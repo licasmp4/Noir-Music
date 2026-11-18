@@ -1,10 +1,10 @@
 #!/bin/sh
-# Monta dist/Noir Music.app (Mac com Apple Silicon). Precisa: brew install opus
+# Monta "dist/Noir Music.app" (Mac com Apple Silicon). Precisa: brew install opus
 set -e
 cd "$(dirname "$0")/.."
 export LIBOPUS_LIB_DIR=/opt/homebrew/opt/opus/lib LIBOPUS_STATIC=1
 cargo build --release -p noir-music
-APP=dist/Noir Music.app
+APP="dist/Noir Music.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp target/release/NoirMusic "$APP/Contents/MacOS/NoirMusic"
@@ -17,5 +17,5 @@ for s in 16 32 128 256; do
 done
 iconutil -c icns "$ICON" -o "$APP/Contents/Resources/NoirMusic.icns"
 codesign --force --deep -s - "$APP"
-(cd dist && rm -f NoirMusic-Mac.zip && ditto -c -k --keepParent Noir Music.app NoirMusic-Mac.zip)
+(cd dist && rm -f NoirMusic-Mac.zip && ditto -c -k --keepParent "Noir Music.app" NoirMusic-Mac.zip)
 echo "pronto: $APP e dist/NoirMusic-Mac.zip"
