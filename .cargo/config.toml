@@ -1,0 +1,7 @@
+# Mac: ScreenCaptureKit precisa de macOS 14 (e o Swift dele não linka com alvo 11).
+# Opus: o do Homebrew (brew install opus), embutido no app
+[target.aarch64-apple-darwin]
+rustflags = ["-C", "link-arg=-mmacosx-version-min=14.0", "-L", "/Library/Developer/CommandLineTools/usr/lib/swift/macosx"]
+
+[env]
+MACOSX_DEPLOYMENT_TARGET = "14.0"

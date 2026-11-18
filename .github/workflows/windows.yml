@@ -1,0 +1,48 @@
+name: Windows
+
+# Compila o Jam pro Windows (quem ouve) e publica o zip na release "windows"
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: windows
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Compilar
+        run: cargo build --release -p jam
+
+      - name: Empacotar
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory Jam | Out-Null
+          Copy-Item target\release\Jam.exe Jam\
+          Copy-Item app\assets\OFL-Inter.txt Jam\
+          Copy-Item app\assets\Phosphor-LICENSE.txt Jam\
+          Compress-Archive Jam\* Jam-Windows.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Jam-Windows
+          path: Jam-Windows.zip
+
+      - name: Publicar
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view windows -R ${{ github.repository }} 2>$null
+          if ($LASTEXITCODE -ne 0) { gh release create windows -R ${{ github.repository }} --title "Jam para Windows" --notes "Baixe o zip, extraia e abra o Jam.exe." }
+          gh release upload windows Jam-Windows.zip -R ${{ github.repository }} --clobber
