@@ -24,6 +24,7 @@ pub fn icon() -> egui::IconData {
 enum Tab {
     Queue,
     Search,
+    Sound,
 }
 
 pub struct App {
@@ -46,6 +47,16 @@ pub struct App {
     /// Capa que estava antes (some devagar quando troca de música)
     prev_art: Option<(String, Instant)>,
     shown_art: String,
+    /// O fundo borrado da capa está na tela (o painel fica translúcido)
+    has_backdrop: bool,
+    /// Fundo anterior (some devagar na troca de música)
+    prev_backdrop: Option<(String, Instant)>,
+    backdrop_url: String,
+    /// Faixa do equalizador sendo arrastada e as frequências suavizadas
+    eq_drag: Option<usize>,
+    eq_spec: Vec<f32>,
+    /// Grão fininho por cima do fundo (degradê escuro em 8 bits faz faixas; o grão some com elas)
+    grain: Option<egui::TextureHandle>,
     /// Prévia sem rede (JAM_DEMO=1) e foto da tela (JAM_SHOT=arquivo.png)
     demo: Option<crate::room::Shared>,
     frame_no: u64,
@@ -81,7 +92,11 @@ impl App {
             session,
             arts,
             error: None,
-            tab: if std::env::var("JAM_DEMO_ABA").as_deref() == Ok("busca") { Tab::Search } else { Tab::Queue },
+            tab: match std::env::var("JAM_DEMO_ABA").as_deref() {
+                Ok("busca") => Tab::Search,
+                Ok("som") => Tab::Sound,
+                _ => Tab::Queue,
+            },
             query: String::new(),
             query_at: None,
             sent_query: String::new(),
@@ -92,6 +107,12 @@ impl App {
             muted: false,
             prev_art: None,
             shown_art: String::new(),
+            has_backdrop: false,
+            prev_backdrop: None,
+            backdrop_url: String::new(),
+            eq_drag: None,
+            eq_spec: Vec::new(),
+            grain: None,
             demo: crate::app::demo(),
             frame_no: 0,
             shot: std::env::var("JAM_SHOT").ok(),
@@ -283,7 +304,7 @@ impl App {
             }
             (None, Some(d)) => {
                 let n = d.state.now.clone();
-                (clone_shared(d), true, n.map(|n| (n.pos, n.track.dur, n.playing)))
+                (clone_shared(d), std::env::var("JAM_DEMO").as_deref() != Ok("ouvinte"), n.map(|n| (n.pos, n.track.dur, n.playing)))
             }
             _ => unreachable!(),
         };
@@ -309,6 +330,7 @@ impl App {
         let stage = Rect::from_min_max(pos2(full.left(), full.top() + top), pos2(full.right() - right_w - 16.0, full.bottom()));
         let side = Rect::from_min_max(pos2(stage.right(), full.top() + top), pos2(full.right() - 16.0, full.bottom() - 16.0));
 
+        self.backdrop(ui, full, &v);
         self.stage(ui, stage, &v);
         self.top_bar(ui, full, &v);
         self.side(ui, side, &v);
@@ -427,7 +449,9 @@ impl App {
         let light = ui.ctx().animate_value_with_time(Id::new("luz-r"), light.r() as f32, 0.6) as u8;
         let lg = ui.ctx().animate_value_with_time(Id::new("luz-g"), tint.g() as f32 * 0.85, 0.6) as u8;
         let lb = ui.ctx().animate_value_with_time(Id::new("luz-b"), tint.b() as f32 * 0.85, 0.6) as u8;
-        theme::spotlight(&p, pos2(stage.center().x, stage.top() - 40.0), vec2(stage.width() * 0.62, stage.height() * 0.95), Color32::from_rgb(light, lg, lb));
+        if !self.has_backdrop {
+            theme::spotlight(&p, pos2(stage.center().x, stage.top() - 40.0), vec2(stage.width() * 0.62, stage.height() * 0.95), Color32::from_rgb(light, lg, lb));
+        }
 
         // capa + player: a capa grande e o vidro por cima da parte de baixo dela
         // o vidro fica em cima da parte de baixo da capa: a lente entorta a própria capa (Canopy 2)
@@ -455,7 +479,7 @@ impl App {
         let radius = 32.0 * k.min(1.15) + inset;
         let shadow = cover_r.translate(vec2(0.0, 18.0)).expand(6.0);
         for i in 0..6 {
-            p.rect_filled(shadow.expand(i as f32 * 6.0), radius + i as f32 * 6.0, Color32::from_black_alpha(30));
+            p.rect_filled(shadow.expand(i as f32 * 6.0), radius + i as f32 * 6.0, Color32::from_black_alpha(if self.has_backdrop { 12 } else { 30 }));
         }
         if let Some((old, at)) = &self.prev_art {
             let t = at.elapsed().as_secs_f32() / 0.35;
@@ -482,7 +506,7 @@ impl App {
 
         // o player de vidro
         let card = Rect::from_min_size(pos2(stage.center().x - card_w / 2.0, cover_r.bottom() - inset - card_h), vec2(card_w, card_h));
-        glass_gl::paint(&p, card, Glass::island(32.0 * k.min(1.15)));
+        glass_gl::paint(&p, card, player_glass(32.0 * k.min(1.15), k, art_color));
         self.player_card(ui, card, k, v);
     }
 
@@ -593,6 +617,241 @@ impl App {
         }
     }
 
+    /// O fundo: a capa bem borrada ocupando a janela toda, girando e respirando devagar (como o
+    /// Apple Music em tela cheia), escurecida pra o texto continuar legível. Troca com fade.
+    fn backdrop(&mut self, ui: &mut Ui, full: Rect, v: &View) {
+        let url = v.state.now.as_ref().map(|n| n.track.art.clone()).unwrap_or_default();
+        if url != self.backdrop_url {
+            self.prev_backdrop = Some((std::mem::take(&mut self.backdrop_url), Instant::now()));
+            self.backdrop_url = url.clone();
+        }
+        let time = ui.input(|i| i.time) as f32;
+        let side = full.width().max(full.height()) * 1.55;
+        let mut paint = |ui: &mut Ui, tex: &egui::TextureHandle, alpha: f32, phase: f32| {
+            // duas camadas girando ao contrário: o borrão "mexe" como tinta, sem parecer uma foto parada
+            for (k, (speed, scale, a)) in [(0.035f32, 1.0f32, 1.0f32), (-0.05, 0.8, 0.55)].into_iter().enumerate() {
+                let breathe = 1.0 + 0.04 * ((time + phase) * 0.21 + k as f32).sin();
+                let size = side * scale * breathe;
+                let drift = vec2(((time + phase) * 0.07 + k as f32 * 2.0).sin(), ((time + phase) * 0.05 + k as f32).cos()) * full.width() * 0.04;
+                let r = Rect::from_center_size(full.center() + drift, vec2(size, size));
+                egui::Image::from_texture((tex.id(), r.size()))
+                    .rotate((time + phase) * speed + k as f32 * 1.7, egui::Vec2::splat(0.5))
+                    .tint(Color32::WHITE.gamma_multiply(alpha * a))
+                    .paint_at(ui, r);
+            }
+        };
+        let cur = self.arts.get(&url).map(|a| a.blur.clone());
+        if let Some((old, at)) = self.prev_backdrop.clone() {
+            let t = at.elapsed().as_secs_f32() / 0.9;
+            if t < 1.0 {
+                if let Some(tex) = self.arts.get(&old).map(|a| a.blur.clone()) {
+                    paint(ui, &tex, 1.0 - ease(t), 0.0);
+                }
+            }
+        }
+        self.has_backdrop = cur.is_some();
+        if let Some(tex) = cur {
+            let t = self.prev_backdrop.as_ref().map_or(1.0, |(_, at)| (at.elapsed().as_secs_f32() / 0.9).min(1.0));
+            paint(ui, &tex, ease(t), 0.0);
+            let p = ui.painter();
+            // escurece: mais em cima (barra) e embaixo, um pouco no meio
+            p.rect_filled(full, 0.0, Color32::from_black_alpha(72));
+            let top = Rect::from_min_size(full.min, vec2(full.width(), 120.0));
+            gradient(p, top, Color32::from_black_alpha(120), Color32::TRANSPARENT);
+            let bottom = Rect::from_min_max(pos2(full.left(), full.bottom() - 160.0), full.max);
+            gradient(p, bottom, Color32::TRANSPARENT, Color32::from_black_alpha(110));
+            let grain = self.grain.get_or_insert_with(|| {
+                let mut seed = 0x2545_F491u32;
+                let px: Vec<u8> = (0..256 * 256)
+                    .flat_map(|_| {
+                        seed ^= seed << 13;
+                        seed ^= seed >> 17;
+                        seed ^= seed << 5;
+                        let v = seed;
+                        let a = ((v & 0xff) % 9) as u8;
+                        if v & 0x100 == 0 { [255, 255, 255, a] } else { [0, 0, 0, a] }
+                    })
+                    .collect();
+                ui.ctx().load_texture("grão", egui::ColorImage::from_rgba_unmultiplied([256, 256], &px), egui::TextureOptions::NEAREST_REPEAT)
+            });
+            let ppp = ui.ctx().pixels_per_point();
+            let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(full.width() * ppp / 256.0, full.height() * ppp / 256.0));
+            ui.painter().image(grain.id(), full, uv, Color32::WHITE);
+            ui.ctx().request_repaint_after(Duration::from_millis(33));
+        }
+    }
+
+    /// Equalizador: a curva de verdade (a resposta dos filtros) com 10 pontos pra arrastar, as
+    /// frequências da música mexendo atrás e os modos prontos embaixo
+    fn equalizer(&mut self, ui: &mut Ui, body: Rect) {
+        use crate::eq;
+        let p = ui.painter().clone();
+        let mut y = body.top();
+        // título e o liga/desliga
+        p.text(pos2(body.left() + 4.0, y + 12.0), Align2::LEFT_CENTER, "Equalizador", theme::semi(15.0), TEXT);
+        let preset_name = if self.prefs.eq_preset == "custom" { "Personalizado".to_string() } else { eq::find(&self.prefs.eq_preset).map_or("Original", |p| p.name).to_string() };
+        p.text(pos2(body.left() + 4.0, y + 32.0), Align2::LEFT_CENTER, &preset_name, theme::regular(12.5), FAINT);
+        let sw = Rect::from_min_size(pos2(body.right() - 46.0, y + 6.0), vec2(42.0, 25.0));
+        let on = self.prefs.eq_on;
+        let resp = ui.interact(sw, Id::new("eq-liga"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+        let t = ui.ctx().animate_bool_with_time(Id::new("eq-liga-t"), on, 0.16);
+        p.rect_filled(sw, 12.5, theme::lerp(Color32::from_white_alpha(40), theme::GOOD, t));
+        p.circle_filled(pos2(sw.left() + 12.5 + t * (sw.width() - 25.0), sw.center().y), 10.5, TEXT);
+        if resp.clicked() {
+            self.prefs.eq_on = !on;
+            self.apply_eq();
+        }
+        y += 52.0;
+
+        // o gráfico
+        let g = Rect::from_min_size(pos2(body.left(), y), vec2(body.width(), 196.0));
+        p.rect_filled(g, 16.0, Color32::from_white_alpha(8));
+        let plot = g.shrink2(vec2(16.0, 18.0));
+        let to_y = |db: f32| plot.center().y - db / eq::MAX_DB * plot.height() / 2.0;
+        let to_x = |f: f32| plot.left() + eq::pos_of(f) * plot.width();
+        for db in [-12.0f32, -6.0, 0.0, 6.0, 12.0] {
+            let yy = to_y(db);
+            p.line_segment([pos2(plot.left(), yy), pos2(plot.right(), yy)], Stroke::new(1.0, Color32::from_white_alpha(if db == 0.0 { 34 } else { 12 })));
+        }
+        // frequências da música (barras finas, suavizadas: sobem rápido, descem devagar)
+        if let Some(o) = self.session.as_ref().and_then(|s| s.output.as_ref()) {
+            let bins = 56;
+            let spec = o.spectrum(bins);
+            if self.eq_spec.len() != bins {
+                self.eq_spec = vec![-90.0; bins];
+            }
+            for (a, b) in self.eq_spec.iter_mut().zip(spec) {
+                *a = if b > *a { *a + (b - *a) * 0.6 } else { *a + (b - *a) * 0.12 };
+            }
+            let bw = plot.width() / bins as f32;
+            for (i, db) in self.eq_spec.iter().enumerate() {
+                let h = ((db + 70.0) / 70.0).clamp(0.0, 1.0) * plot.height();
+                if h < 1.0 {
+                    continue;
+                }
+                let x = plot.left() + i as f32 * bw;
+                p.rect_filled(Rect::from_min_max(pos2(x + 1.0, plot.bottom() - h), pos2(x + bw - 1.0, plot.bottom())), 2.0, Color32::from_white_alpha(18));
+            }
+            ui.ctx().request_repaint_after(Duration::from_millis(33));
+        }
+        // a curva de verdade e o preenchimento até o zero
+        let gains = if self.prefs.eq_on { self.prefs.eq_gains } else { [0.0; eq::N] };
+        let n = 120;
+        let c = eq::curve(&gains, n);
+        let pts: Vec<Pos2> = c.iter().enumerate().map(|(i, db)| pos2(plot.left() + plot.width() * i as f32 / (n - 1) as f32, to_y(db.clamp(-eq::MAX_DB - 2.0, eq::MAX_DB + 2.0)))).collect();
+        let zero = to_y(0.0);
+        let mut mesh = egui::epaint::Mesh::default();
+        let fill = Color32::from_white_alpha(if self.prefs.eq_on { 26 } else { 10 });
+        for (i, pt) in pts.iter().enumerate() {
+            mesh.colored_vertex(*pt, fill);
+            mesh.colored_vertex(pos2(pt.x, zero), Color32::TRANSPARENT);
+            if i > 0 {
+                let k = (i * 2) as u32;
+                mesh.add_triangle(k - 2, k - 1, k);
+                mesh.add_triangle(k - 1, k, k + 1);
+            }
+        }
+        p.add(egui::Shape::mesh(mesh));
+        p.add(egui::Shape::line(pts, Stroke::new(2.0, Color32::from_white_alpha(if self.prefs.eq_on { 235 } else { 90 }))));
+        // os pontos pra arrastar
+        let pointer = ui.input(|i| i.pointer.interact_pos());
+        let down = ui.input(|i| i.pointer.primary_down());
+        if !down {
+            if self.eq_drag.take().is_some() {
+                self.prefs.save();
+            }
+        }
+        for i in 0..eq::N {
+            let x = to_x(eq::BANDS[i]);
+            let yy = to_y(self.prefs.eq_gains[i]);
+            let hit = Rect::from_center_size(pos2(x, plot.center().y), vec2(plot.width() / eq::N as f32, plot.height() + 24.0));
+            let r = ui.interact(hit, Id::new(("eq-ponto", i)), Sense::click_and_drag());
+            if r.drag_started() || r.clicked() {
+                self.eq_drag = Some(i);
+            }
+            if r.double_clicked() {
+                self.prefs.eq_gains[i] = 0.0;
+                self.prefs.eq_preset = "custom".into();
+                self.apply_eq();
+            }
+            let active = self.eq_drag == Some(i);
+            if active {
+                if let Some(m) = pointer {
+                    let db = ((plot.center().y - m.y) / (plot.height() / 2.0) * eq::MAX_DB).clamp(-eq::MAX_DB, eq::MAX_DB);
+                    let db = (db * 2.0).round() / 2.0;
+                    if db != self.prefs.eq_gains[i] {
+                        self.prefs.eq_gains[i] = db;
+                        self.prefs.eq_preset = "custom".into();
+                        if !self.prefs.eq_on {
+                            self.prefs.eq_on = true;
+                        }
+                        self.apply_eq();
+                    }
+                }
+            }
+            let hover = r.hovered() || active;
+            let rad = ui.ctx().animate_bool_with_time(Id::new(("eq-r", i)), hover, 0.1) * 2.5 + 5.5;
+            if self.prefs.eq_on {
+                p.circle_filled(pos2(x, yy), rad + 2.0, Color32::from_black_alpha(160));
+                p.circle_filled(pos2(x, yy), rad, TEXT);
+            } else {
+                p.circle_stroke(pos2(x, yy), rad, Stroke::new(1.5, Color32::from_white_alpha(110)));
+            }
+            p.text(pos2(x, g.bottom() + 12.0), Align2::CENTER_CENTER, eq::LABELS[i], theme::medium(10.5), if hover { TEXT } else { FAINT });
+            if hover {
+                let v = self.prefs.eq_gains[i];
+                let label = format!("{}{:.1} dB", if v > 0.0 { "+" } else { "" }, v);
+                let tag = Rect::from_center_size(pos2(x.clamp(plot.left() + 30.0, plot.right() - 30.0), (yy - 22.0).max(g.top() + 12.0)), vec2(62.0, 22.0));
+                p.rect_filled(tag, 11.0, TEXT);
+                p.text(tag.center(), Align2::CENTER_CENTER, label, theme::semi(11.0), Color32::BLACK);
+                r.on_hover_cursor(egui::CursorIcon::ResizeVertical);
+            }
+        }
+        y = g.bottom() + 30.0;
+
+        // modos prontos (duas colunas de pílulas chapadas; o escolhido branco)
+        p.text(pos2(body.left() + 4.0, y), Align2::LEFT_TOP, "MODOS", theme::semi(11.0), FAINT);
+        y += 22.0;
+        let cols = 2;
+        let gap = 8.0;
+        let cw = (body.width() - gap) / cols as f32;
+        let list = Rect::from_min_max(pos2(body.left(), y), body.max);
+        ui.scope_builder(egui::UiBuilder::new().max_rect(list), |ui| {
+            egui::ScrollArea::vertical().id_salt("eq-modos").auto_shrink([false, false]).show(ui, |ui| {
+                for row in eq::PRESETS.chunks(cols) {
+                    let (r, _) = ui.allocate_exact_size(vec2(list.width(), 36.0), Sense::hover());
+                    for (k, pr) in row.iter().enumerate() {
+                        let cell = Rect::from_min_size(pos2(r.left() + k as f32 * (cw + gap), r.top()), vec2(cw, 32.0));
+                        let chosen = self.prefs.eq_preset == pr.id && self.prefs.eq_on;
+                        let resp = ui.interact(cell, Id::new(("eq-modo", pr.id)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+                        let h = ui.ctx().animate_bool_with_time(Id::new(("eq-modo-h", pr.id)), resp.hovered(), 0.1);
+                        let bg = if chosen { Color32::from_rgb(0xF5, 0xF5, 0xF7) } else { theme::lerp(Color32::from_white_alpha(14), Color32::from_white_alpha(30), h) };
+                        ui.painter().rect_filled(cell, 16.0, bg);
+                        // a forma do modo em miniatura, à esquerda
+                        let mini = eq::curve(&pr.gains, 12);
+                        let mx = cell.left() + 12.0;
+                        let pts: Vec<Pos2> = mini.iter().enumerate().map(|(i, db)| pos2(mx + i as f32 * 2.0, cell.center().y - db.clamp(-8.0, 8.0) * 0.8)).collect();
+                        ui.painter().add(egui::Shape::line(pts, Stroke::new(1.5, if chosen { Color32::from_gray(60) } else { Color32::from_white_alpha(120) })));
+                        ui.painter().text(pos2(cell.left() + 42.0, cell.center().y), Align2::LEFT_CENTER, pr.name, theme::medium(12.5), if chosen { Color32::BLACK } else { TEXT });
+                        if resp.clicked() {
+                            self.prefs.eq_preset = pr.id.to_string();
+                            self.prefs.eq_gains = pr.gains;
+                            self.prefs.eq_on = true;
+                            self.apply_eq();
+                            self.prefs.save();
+                        }
+                    }
+                }
+            });
+        });
+    }
+
+    fn apply_eq(&mut self) {
+        if let Some(o) = self.session.as_ref().and_then(|s| s.output.as_ref()) {
+            o.set_eq(self.prefs.eq_gains, self.prefs.eq_on);
+        }
+    }
+
     fn cmd(&self, c: &str) {
         if let Some(s) = &self.session {
             s.cmd(c);
@@ -607,27 +866,38 @@ impl App {
 
     fn side(&mut self, ui: &mut Ui, side: Rect, v: &View) {
         let p = ui.painter().clone();
-        p.rect_filled(side, 24.0, SURFACE);
-        p.rect_stroke(side, 24.0, Stroke::new(1.0, theme::hairline()), StrokeKind::Inside);
+        p.rect_filled(side, 24.0, Color32::from_black_alpha(if self.has_backdrop { 120 } else { 255 }));
+        if !self.has_backdrop {
+            p.rect_filled(side, 24.0, SURFACE);
+        }
+        p.rect_stroke(side, 24.0, Stroke::new(1.0, Color32::from_white_alpha(22)), StrokeKind::Inside);
         let inner = side.shrink(16.0);
 
-        // abas: Fila | Buscar (seletor chapado, a escolhida branca)
+        // abas: Fila | Buscar | Som (seletor chapado, a escolhida branca). Quem toca não tem Som:
+        // ele ouve direto do Spotify/Apple Music
         let seg = Rect::from_min_size(inner.min, vec2(inner.width(), 36.0));
-        p.rect_filled(seg, 18.0, Color32::from_white_alpha(12));
-        let half = seg.width() / 2.0;
+        p.rect_filled(seg, 18.0, Color32::from_white_alpha(14));
         let qn = v.state.queue.len();
-        for (i, (tab, label)) in [(Tab::Queue, if qn > 0 { format!("Fila · {qn}") } else { "Fila".to_string() }), (Tab::Search, "Buscar".to_string())].into_iter().enumerate() {
-            let r = Rect::from_min_size(pos2(seg.left() + half * i as f32, seg.top()), vec2(half, seg.height())).shrink(3.0);
-            let resp = ui.interact(r, Id::new(("aba", i)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
-            if resp.clicked() {
-                self.tab = tab;
+        let mut tabs = vec![(Tab::Queue, if qn > 0 { format!("Fila · {qn}") } else { "Fila".to_string() }), (Tab::Search, "Buscar".to_string())];
+        if !v.host {
+            tabs.push((Tab::Sound, "Som".to_string()));
+        }
+        if v.host && self.tab == Tab::Sound {
+            self.tab = Tab::Queue;
+        }
+        let w = seg.width() / tabs.len() as f32;
+        let cur = tabs.iter().position(|(t, _)| *t == self.tab).unwrap_or(0);
+        for (i, (tab, _)) in tabs.iter().enumerate() {
+            let r = Rect::from_min_size(pos2(seg.left() + w * i as f32, seg.top()), vec2(w, seg.height())).shrink(3.0);
+            if ui.interact(r, Id::new(("aba", i)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                self.tab = *tab;
             }
         }
-        let t = ui.ctx().animate_value_with_time(Id::new("aba-x"), if self.tab == Tab::Queue { 0.0 } else { 1.0 }, 0.18);
-        let sel = Rect::from_min_size(pos2(seg.left() + 3.0 + half * t, seg.top() + 3.0), vec2(half - 6.0, seg.height() - 6.0));
+        let t = ui.ctx().animate_value_with_time(Id::new("aba-x"), cur as f32, 0.18);
+        let sel = Rect::from_min_size(pos2(seg.left() + 3.0 + w * t, seg.top() + 3.0), vec2(w - 6.0, seg.height() - 6.0));
         p.rect_filled(sel, 15.0, Color32::from_rgb(0xF5, 0xF5, 0xF7));
-        for (i, label) in [if qn > 0 { format!("Fila · {qn}") } else { "Fila".to_string() }, "Buscar".to_string()].into_iter().enumerate() {
-            let c = pos2(seg.left() + half * (i as f32 + 0.5), seg.center().y);
+        for (i, (_, label)) in tabs.iter().enumerate() {
+            let c = pos2(seg.left() + w * (i as f32 + 0.5), seg.center().y);
             let on = (i as f32 - t).abs() < 0.5;
             p.text(c, Align2::CENTER_CENTER, label, theme::semi(13.0), if on { Color32::BLACK } else { DIM });
         }
@@ -636,6 +906,7 @@ impl App {
         match self.tab {
             Tab::Queue => self.queue_list(ui, body, v),
             Tab::Search => self.search(ui, body, v),
+            Tab::Sound => self.equalizer(ui, body),
         }
 
         // volume de quem ouve
@@ -943,6 +1214,45 @@ enum RowKind {
     Result,
 }
 
+/// O vidro do player em cima da capa. JAM_VIDRO escolhe a variação (pra comparar):
+/// a = ilha do Canopy 2 igual (fumê quase preto em cima) · b = cartão do Noir (mesma lente, fumê aberto)
+/// c = cartão com a lente na escala da peça e a cor da capa · d = c com fosco leve no meio
+fn player_glass(radius: f32, k: f32, tint: Color32) -> Glass {
+    let v = std::env::var("JAM_VIDRO").unwrap_or_else(|_| "c".into());
+    let mut g = match v.as_str() {
+        "a" => Glass::island(radius),
+        _ => Glass::card([radius; 4]),
+    };
+    if matches!(v.as_str(), "c" | "d") {
+        // a peça é ~1,6x a ilha medida: a lente cresce junto (senão a faixa que entorta fica fininha)
+        let s = k.clamp(1.0, 1.8);
+        g.force = 60.0 * s;
+        g.band = 36.0 * s;
+        g.chroma = 3.0 * s;
+        g.smoke = [0.58, 0.46, 0.30, 0.22];
+        g.smoke_at = [0.35, 0.7];
+        g.saturation = 1.3;
+        g.rim = 0.38;
+        g = g.with_tint(Some(tint), 0.10);
+    }
+    if v == "d" {
+        g.frost = 0.45;
+    }
+    g
+}
+
+/// Degradê de cima pra baixo
+fn gradient(p: &egui::Painter, r: Rect, top: Color32, bottom: Color32) {
+    let mut m = egui::epaint::Mesh::default();
+    m.colored_vertex(r.left_top(), top);
+    m.colored_vertex(r.right_top(), top);
+    m.colored_vertex(r.left_bottom(), bottom);
+    m.colored_vertex(r.right_bottom(), bottom);
+    m.add_triangle(0, 1, 2);
+    m.add_triangle(1, 2, 3);
+    p.add(egui::Shape::mesh(m));
+}
+
 fn ease(t: f32) -> f32 {
     let t = t.clamp(0.0, 1.0);
     1.0 - (1.0 - t).powi(3)
@@ -964,7 +1274,7 @@ fn clone_shared(s: &crate::room::Shared) -> crate::room::Shared {
 /// JAM_DEMO=1: uma Jam de mentira (sem rede) pra conferir o desenho. JAM_DEMO_ART = capa (arquivo)
 pub fn demo() -> Option<crate::room::Shared> {
     std::env::var_os("JAM_DEMO")?;
-    let art = std::env::var("JAM_DEMO_ART").map(|p| format!("file://{p}")).unwrap_or_default();
+    let art = std::env::var("JAM_DEMO_ART").map(|p| if p.starts_with("https://") { p } else { format!("file://{p}") }).unwrap_or_default();
     let t = |title: &str, artist: &str, by: &str, dur: f64| Track { id: format!("spotify:track:{title}"), title: title.into(), artist: artist.into(), album: String::new(), art: art.clone(), dur, by: by.into() };
     let tab = std::env::var("JAM_DEMO_ABA").unwrap_or_default();
     let mut results = crate::room::Results::default();

@@ -118,6 +118,8 @@ pub fn send(source: &str, cmd: &Cmd) -> Result<(), String> {
         Cmd::Play => osa(&format!("tell application \"{app}\" to play"), &[]),
         Cmd::Pause => osa(&format!("tell application \"{app}\" to pause"), &[]),
         Cmd::Next => osa(&format!("tell application \"{app}\" to next track"), &[]),
+        // Apple Music: "back track" volte pro começo ou pra anterior (o "previous track" dele às vezes não faz nada)
+        Cmd::Prev if source == "music" => osa("tell application \"Music\" to back track", &[]),
         Cmd::Prev => osa(&format!("tell application \"{app}\" to previous track"), &[]),
         Cmd::Seek(s) => osa(&format!("on run argv\ntell application \"{app}\" to set player position to (item 1 of argv as number)\nend run"), &[&format!("{}", s.max(0.0).round() as i64)]),
         Cmd::Track(id) if source == "spotify" => {

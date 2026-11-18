@@ -5,6 +5,7 @@ mod app;
 mod arts;
 mod audio;
 mod capture;
+mod eq;
 mod glass_gl;
 mod log;
 mod player;
@@ -17,6 +18,19 @@ mod theme;
 fn main() -> eframe::Result<()> {
     std::panic::set_hook(Box::new(|p| crate::log::log(format!("travou: {p}"))));
     log::log(format!("Jam {} abrindo", env!("CARGO_PKG_VERSION")));
+    // JAM_TESTE=1 JAM_AUTO=join:CODIGO: roda o roteiro de controles sem janela e sai
+    if std::env::var_os("JAM_TESTE").is_some() {
+        if let Some(code) = std::env::var("JAM_AUTO").ok().and_then(|a| a.strip_prefix("join:").map(String::from)) {
+            let mut p = prefs::Prefs::load();
+            p.name = "Teste".into();
+            p.volume = 0.0;
+            let s = room::Session::join(&p, code, std::sync::Arc::new(|| {}));
+            s.run_test();
+            drop(s);
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            return Ok(());
+        }
+    }
     let size = std::env::var("JAM_SIZE")
         .ok()
         .and_then(|s| s.split_once('x').and_then(|(w, h)| Some([w.parse().ok()?, h.parse().ok()?])))

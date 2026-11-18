@@ -151,6 +151,13 @@ struct Shared {
     /// pro registro: amostras que chegaram e o pico (antes do volume)
     pushed: u64,
     in_peak: f32,
+    /// equalizador (nasce com a taxa da saída) e o que ele deve usar
+    eq: Option<crate::eq::Eq>,
+    eq_want: ([f32; crate::eq::N], bool),
+    /// o que tocou por último (mono), pro desenho das frequências
+    scope: VecDeque<f32>,
+    rate: f32,
+    tmp: Vec<f32>,
 }
 
 pub struct Output {
@@ -176,8 +183,15 @@ impl Output {
             playing: true,
             pushed: 0,
             in_peak: 0.0,
+            eq: None,
+            eq_want: ([0.0; crate::eq::N], true),
+            scope: VecDeque::with_capacity(crate::eq::FFT_N * 2),
+            rate: RATE as f32,
+            tmp: Vec::new(),
         }));
-        match open(shared.clone()) {
+        // JAM_SEM_SAIDA=1: não abre o som (teste com várias janelas no mesmo fone Bluetooth)
+        let opened = if std::env::var_os("JAM_SEM_SAIDA").is_some() { Err("sem saída (teste)".to_string()) } else { open(shared.clone()) };
+        match opened {
             Ok((stream, device)) => Output { shared, _stream: Some(stream), device, error: None },
             Err(e) => {
                 crate::log::log(format!("saída de som: {e}"));
@@ -209,6 +223,23 @@ impl Output {
 
     pub fn set_volume(&self, v: f32) {
         self.shared.lock().unwrap_or_else(|e| e.into_inner()).volume = v.clamp(0.0, 1.0);
+    }
+
+    pub fn set_eq(&self, gains: [f32; crate::eq::N], on: bool) {
+        let mut s = self.shared.lock().unwrap_or_else(|e| e.into_inner());
+        s.eq_want = (gains, on);
+        if let Some(e) = s.eq.as_mut() {
+            e.set(gains, on);
+        }
+    }
+
+    /// Frequências do que está tocando (dB por faixa) e a taxa da saída
+    pub fn spectrum(&self, bins: usize) -> Vec<f32> {
+        let (samples, rate) = {
+            let s = self.shared.lock().unwrap_or_else(|e| e.into_inner());
+            (s.scope.iter().copied().collect::<Vec<f32>>(), s.rate)
+        };
+        crate::eq::spectrum(&samples, rate, bins)
     }
 
     pub fn set_playing(&self, on: bool) {
@@ -258,6 +289,13 @@ fn open(shared: Arc<Mutex<Shared>>) -> Result<(cpal::Stream, String), String> {
     }
     let channels = config.channels as usize;
     let step = RATE as f64 / config.sample_rate as f64;
+    {
+        let mut s = shared.lock().unwrap_or_else(|e| e.into_inner());
+        let mut eq = crate::eq::Eq::new(config.sample_rate as f32);
+        eq.set(s.eq_want.0, s.eq_want.1);
+        s.eq = Some(eq);
+        s.rate = config.sample_rate as f32;
+    }
     crate::log::log(format!("saída de som: {name} {} Hz {channels} canais {fmt:?}", config.sample_rate));
     
     let stream = match fmt {
@@ -282,7 +320,9 @@ fn fill<T: Copy>(shared: &Arc<Mutex<Shared>>, out: &mut [T], channels: usize, st
     let mut s = shared.lock().unwrap_or_else(|e| e.into_inner());
     let frames = out.len() / channels.max(1);
     let mut peak = 0.0f32;
-    for f in 0..frames {
+    let mut tmp = std::mem::take(&mut s.tmp);
+    tmp.clear();
+    for _ in 0..frames {
         let (l, r) = if !s.started {
             (0.0, 0.0)
         } else if step == 1.0 {
@@ -293,30 +333,42 @@ fn fill<T: Copy>(shared: &Arc<Mutex<Shared>>, out: &mut [T], channels: usize, st
                     (0.0, 0.0)
                 }
             }
-        } else {
+        } else if s.q.len() < 6 {
             // precisa de 2 amostras à frente pra interpolar
-            if s.q.len() < 6 {
-                under(&mut s);
-                (0.0, 0.0)
-            } else {
-                let t = s.pos as f32;
-                let h = s.hist;
-                let l = cubic(h[0], h[2], s.q[0], s.q[2], t);
-                let r = cubic(h[1], h[3], s.q[1], s.q[3], t);
-                s.pos += step;
-                while s.pos >= 1.0 {
-                    s.pos -= 1.0;
-                    let (a, b) = (s.q.pop_front().unwrap_or(0.0), s.q.pop_front().unwrap_or(0.0));
-                    s.hist = [s.hist[2], s.hist[3], a, b, 0.0, 0.0, 0.0, 0.0];
-                }
-                (l, r)
+            under(&mut s);
+            (0.0, 0.0)
+        } else {
+            let t = s.pos as f32;
+            let h = s.hist;
+            let l = cubic(h[0], h[2], s.q[0], s.q[2], t);
+            let r = cubic(h[1], h[3], s.q[1], s.q[3], t);
+            s.pos += step;
+            while s.pos >= 1.0 {
+                s.pos -= 1.0;
+                let (a, b) = (s.q.pop_front().unwrap_or(0.0), s.q.pop_front().unwrap_or(0.0));
+                s.hist = [s.hist[2], s.hist[3], a, b, 0.0, 0.0, 0.0, 0.0];
             }
+            (l, r)
         };
-        let g = s.volume * s.fade;
+        let g = s.fade;
         if s.started && s.fade < 1.0 {
             s.fade = (s.fade + 1.0 / 240.0).min(1.0);
         }
-        let (l, r) = (l * g, r * g);
+        tmp.push(l * g);
+        tmp.push(r * g);
+    }
+    // equalizador antes do volume (o desenho mostra o som já equalizado)
+    if let Some(eq) = s.eq.as_mut() {
+        eq.process(&mut tmp);
+    }
+    for f in tmp.chunks_exact(2) {
+        s.scope.push_back((f[0] + f[1]) * 0.5);
+    }
+    let extra = s.scope.len().saturating_sub(crate::eq::FFT_N);
+    s.scope.drain(..extra);
+    let vol = s.volume;
+    for (f, lr) in tmp.chunks_exact(2).enumerate() {
+        let (l, r) = (lr[0] * vol, lr[1] * vol);
         peak = peak.max(l.abs()).max(r.abs());
         let o = &mut out[f * channels..(f + 1) * channels];
         if channels == 1 {
@@ -329,6 +381,7 @@ fn fill<T: Copy>(shared: &Arc<Mutex<Shared>>, out: &mut [T], channels: usize, st
             }
         }
     }
+    s.tmp = tmp;
     s.level = s.level * 0.8 + peak * 0.2;
 }
 

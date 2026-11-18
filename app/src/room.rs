@@ -157,6 +157,7 @@ impl Session {
         lock(&s.shared).code = Some(code.clone());
         let out = Arc::new(Output::new());
         out.set_volume(prefs.volume);
+        out.set_eq(prefs.eq_gains, prefs.eq_on);
         s.output = Some(out.clone());
         let (sh, mem, name) = (s.shared.clone(), s.member.clone(), prefs.name.clone());
         std::thread::spawn(move || join(String::new(), code, name, sh, mem, repaint, None, Some(out)));
@@ -219,6 +220,78 @@ impl Session {
         let rid = self.rid.fetch_add(1, Ordering::Relaxed);
         lock(&self.shared).results = Results { rid, q: q.to_string(), loading: true, ..Default::default() };
         self.send(json!({"t": "search", "q": q, "rid": rid}));
+    }
+
+    /// JAM_TESTE=1 (quem ouve): busca, põe na fila, pula, adianta, pausa, volta, tira da fila e
+    /// anota no registro o que quem toca respondeu a cada passo
+    pub fn run_test(&self) {
+        let me = self;
+        {
+            let wait = |secs: u64| std::thread::sleep(Duration::from_secs(secs));
+            let now = |s: &Session| {
+                let sh = lock(&s.shared);
+                let n = sh.state.now.clone();
+                let q: Vec<String> = sh.state.queue.iter().map(|t| t.title.clone()).collect();
+                drop(sh);
+                let p = s.position();
+                format!("tocando {:?} pos {:.1} {} · fila {:?}", n.map(|n| n.track.title), p.map_or(0.0, |p| p.0), if p.is_some_and(|p| p.2) { "▶" } else { "⏸" }, q)
+            };
+            for _ in 0..30 {
+                if lock(&me.shared).phase == Phase::Live && lock(&me.shared).state.now.is_some() {
+                    break;
+                }
+                wait(1);
+            }
+            crate::log::log(format!("TESTE início: {}", now(&me)));
+            me.search(&std::env::var("JAM_TESTE_BUSCA").unwrap_or("love".into()));
+            for _ in 0..20 {
+                if !lock(&me.shared).results.loading {
+                    break;
+                }
+                wait(1);
+            }
+            let items = lock(&me.shared).results.items.clone();
+            crate::log::log(format!("TESTE busca: {} resultados, {:?}", items.len(), items.iter().take(3).map(|t| (&t.title, !t.art.is_empty())).collect::<Vec<_>>()));
+            if items.len() < 3 {
+                crate::log::log("TESTE parou: busca sem resultado");
+                return;
+            }
+            me.add(&items[0]);
+            me.add(&items[1]);
+            me.add(&items[2]);
+            wait(2);
+            crate::log::log(format!("TESTE pôs 3 na fila: {}", now(&me)));
+            me.to_top(2);
+            wait(2);
+            crate::log::log(format!("TESTE a 3ª subiu pro topo: {}", now(&me)));
+            me.remove(1);
+            wait(2);
+            crate::log::log(format!("TESTE tirou a 2ª: {}", now(&me)));
+            me.cmd("next");
+            wait(3);
+            crate::log::log(format!("TESTE próxima (deve tocar {}): {}", items[2].title, now(&me)));
+            me.seek(60.0);
+            wait(3);
+            crate::log::log(format!("TESTE adiantou pra 60 s: {}", now(&me)));
+            me.cmd("toggle");
+            wait(3);
+            crate::log::log(format!("TESTE pausou: {}", now(&me)));
+            me.cmd("toggle");
+            wait(3);
+            crate::log::log(format!("TESTE voltou a tocar: {}", now(&me)));
+            me.cmd("prev");
+            wait(3);
+            crate::log::log(format!("TESTE anterior: {}", now(&me)));
+            me.play_now(&items[1]);
+            wait(3);
+            crate::log::log(format!("TESTE tocar agora {}: {}", items[1].title, now(&me)));
+            // fim da música emenda na fila: adianta pra 4 s do fim
+            let dur = lock(&me.shared).state.now.as_ref().map_or(0.0, |n| n.track.dur);
+            me.seek((dur - 4.0).max(0.0));
+            wait(7);
+            crate::log::log(format!("TESTE no fim da música, a fila (deve tocar {}): {}", items[0].title, now(&me)));
+            crate::log::log("TESTE fim");
+        }
     }
 
     pub fn set_spotify(&self, id: &str, secret: &str) {
@@ -455,7 +528,11 @@ impl Engine {
 
     fn read(&mut self) {
         self.next_read = Instant::now() + Duration::from_millis(1000);
-        let list = player::read();
+        let mut list = player::read();
+        // teste: JAM_SOURCE=music só olha pro Apple Music (não mexe no Spotify de quem está ouvindo)
+        if let Ok(only) = std::env::var("JAM_SOURCE") {
+            list.retain(|r| r.source == only);
+        }
         let prev = self.now.clone();
         let prev_left = prev.as_ref().map(|n| n.track.dur - self.pos_now());
         let pick = list.iter().find(|r| r.playing).or_else(|| list.iter().find(|r| r.source == self.source)).or(list.first()).cloned();
@@ -479,7 +556,9 @@ impl Engine {
             }
             None => {
                 self.now = None;
-                if let Some(s) = player::running().into_iter().find(|s| *s == self.source).or(player::running().first().copied()) {
+                let only = std::env::var("JAM_SOURCE").ok();
+                let run: Vec<&str> = player::running().into_iter().filter(|s| only.as_deref().is_none_or(|o| o == *s)).collect();
+                if let Some(s) = run.iter().find(|s| **s == self.source).or(run.first()).copied() {
                     self.source = s.to_string();
                 } else {
                     self.source.clear();
@@ -730,6 +809,13 @@ impl Engine {
                 t.by = who.chars().take(32).collect();
                 let idle = self.now.as_ref().is_none_or(|n| !n.playing);
                 if d["t"] == "play" || (idle && self.queue.is_empty()) {
+                    // tocar agora tira a mesma música da fila (senão ela tocava duas vezes)
+                    let id = t.id.clone();
+                    let before = self.queue.len();
+                    self.queue.retain(|q| q.id != id);
+                    if self.queue.len() != before {
+                        self.publish(true);
+                    }
                     if !me {
                         self.toast(format!("{} tocou {}", t.by, t.title));
                     }
