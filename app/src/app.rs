@@ -24,6 +24,7 @@ pub fn icon() -> egui::IconData {
 enum Tab {
     Queue,
     Search,
+    Lyrics,
     Sound,
 }
 
@@ -57,6 +58,14 @@ pub struct App {
     eq_spec: Vec<f32>,
     /// Grão fininho por cima do fundo (degradê escuro em 8 bits faz faixas; o grão some com elas)
     grain: Option<egui::TextureHandle>,
+    /// Tela cheia do Apple Music (capa à esquerda, letra à direita)
+    fullscreen: bool,
+    lyr_side: crate::lyric_view::LyricView,
+    lyr_full: crate::lyric_view::LyricView,
+    /// Última vez que o mouse mexeu (na tela cheia os botões de cima somem depois de 3 s parado)
+    moved_at: f64,
+    /// Encolhe a capa quando pausa (mola)
+    cover_k: (f32, f32),
     /// Prévia sem rede (JAM_DEMO=1) e foto da tela (JAM_SHOT=arquivo.png)
     demo: Option<crate::room::Shared>,
     frame_no: u64,
@@ -95,6 +104,7 @@ impl App {
             tab: match std::env::var("JAM_DEMO_ABA").as_deref() {
                 Ok("busca") => Tab::Search,
                 Ok("som") => Tab::Sound,
+                Ok("letra") => Tab::Lyrics,
                 _ => Tab::Queue,
             },
             query: String::new(),
@@ -113,6 +123,11 @@ impl App {
             eq_drag: None,
             eq_spec: Vec::new(),
             grain: None,
+            fullscreen: std::env::var("JAM_DEMO_CHEIA").is_ok(),
+            lyr_side: Default::default(),
+            lyr_full: Default::default(),
+            moved_at: 0.0,
+            cover_k: (1.0, 0.0),
             demo: crate::app::demo(),
             frame_no: 0,
             shot: std::env::var("JAM_SHOT").ok(),
@@ -330,7 +345,20 @@ impl App {
         let stage = Rect::from_min_max(pos2(full.left(), full.top() + top), pos2(full.right() - right_w - 16.0, full.bottom()));
         let side = Rect::from_min_max(pos2(stage.right(), full.top() + top), pos2(full.right() - 16.0, full.bottom() - 16.0));
 
+        // tela cheia: F liga/desliga, Esc sai
+        let typing = ui.ctx().egui_wants_keyboard_input();
+        let (f, esc, moved, t) = ui.input(|i| (i.key_pressed(egui::Key::F), i.key_pressed(egui::Key::Escape), i.pointer.delta() != vec2(0.0, 0.0) || i.pointer.any_down(), i.time));
+        if moved || self.moved_at == 0.0 {
+            self.moved_at = t;
+        }
+        if (f && !typing) || (esc && self.fullscreen) {
+            self.set_fullscreen(ui.ctx(), !self.fullscreen);
+        }
         self.backdrop(ui, full, &v);
+        if self.fullscreen {
+            self.full_view(ui, full, &v);
+            return;
+        }
         self.stage(ui, stage, &v);
         self.top_bar(ui, full, &v);
         self.side(ui, side, &v);
@@ -406,6 +434,11 @@ impl App {
             }
             rx = g.left() - 6.0;
         }
+        let g = Rect::from_center_size(pos2(rx - 18.0, y), vec2(34.0, 34.0));
+        if theme::icon_button(ui, g, "cheia", icon::EXPAND, 17.0, true).on_hover_text("Tela cheia com a letra (F)").clicked() {
+            self.set_fullscreen(ui.ctx(), true);
+        }
+        rx = g.left() - 6.0;
         let people: Vec<&String> = v.people.iter().collect();
         let n = people.len();
         if n > 0 {
@@ -477,9 +510,14 @@ impl App {
 
         // a capa (a anterior some por baixo quando troca)
         let radius = 32.0 * k.min(1.15) + inset;
-        let shadow = cover_r.translate(vec2(0.0, 18.0)).expand(6.0);
-        for i in 0..6 {
-            p.rect_filled(shadow.expand(i as f32 * 6.0), radius + i as f32 * 6.0, Color32::from_black_alpha(if self.has_backdrop { 12 } else { 30 }));
+        // sombra de verdade (desfoque gaussiano do epaint, sem anéis): uma larga e macia puxando pra
+        // cor da capa e uma curta perto da borda pra dar peso
+        let cr = egui::CornerRadius::same(radius.round().min(255.0) as u8);
+        let deep = Color32::from_rgb(art_color.r() / 5, art_color.g() / 5, art_color.b() / 5);
+        // o desfoque do epaint é uma rampa reta: várias camadas dobrando de tamanho viram uma curva macia
+        for (off, blur, a) in [(4i8, 8u8, 0.16f32), (12, 24, 0.16), (28, 56, 0.18), (48, 110, 0.22)] {
+            let c = Color32::from_rgba_unmultiplied(deep.r(), deep.g(), deep.b(), (255.0 * a) as u8);
+            p.add(egui::epaint::Shadow { offset: [0, off], blur, spread: 0, color: c }.as_shape(cover_r, cr));
         }
         if let Some((old, at)) = &self.prev_art {
             let t = at.elapsed().as_secs_f32() / 0.35;
@@ -614,6 +652,198 @@ impl App {
             if ui.interact(g, Id::new("fila-botao"), Sense::click()).on_hover_text("Ver a fila").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                 self.tab = Tab::Queue;
             }
+        }
+    }
+
+    fn set_fullscreen(&mut self, ctx: &egui::Context, on: bool) {
+        self.fullscreen = on;
+        if std::env::var_os("JAM_SHOT").is_none() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(on));
+        }
+    }
+
+    /// A letra da música que está tocando: busca (uma vez), mostra e deixa clicar numa linha pra pular
+    fn lyrics_area(&mut self, ui: &mut Ui, rect: Rect, v: &View, size: f32, anchor: f32, full: bool) -> bool {
+        let Some(n) = v.state.now.as_ref() else {
+            crate::lyric_view::empty(ui.painter(), rect, "Nada tocando");
+            return false;
+        };
+        let t = &n.track;
+        let ctx = ui.ctx().clone();
+        let st = crate::lyrics::get(&t.title, &t.artist, &t.album, t.dur as f32, move || ctx.request_repaint());
+        match st {
+            crate::lyrics::State::Loading => {
+                let a = (ui.input(|i| i.time) as f32 * 3.0).sin() * 0.25 + 0.5;
+                ui.painter().text(rect.center(), Align2::CENTER_CENTER, "Procurando a letra…", theme::medium(14.0), Color32::from_white_alpha((255.0 * a) as u8));
+                ui.ctx().request_repaint_after(Duration::from_millis(50));
+                false
+            }
+            crate::lyrics::State::None => {
+                crate::lyric_view::empty(ui.painter(), rect, "Essa música não tem letra ainda");
+                false
+            }
+            crate::lyrics::State::Ready(l) if l.instrumental || l.lines.is_empty() => {
+                crate::lyric_view::empty(ui.painter(), rect, "Instrumental");
+                false
+            }
+            crate::lyrics::State::Ready(l) => {
+                // a letra aparece um tiquinho antes (o som chega com atraso pra quem ouve)
+                let pos = v.pos.map_or(0.0, |p| p.0) as f32 + 0.2;
+                let key = format!("{}{}", t.id, t.title);
+                let view = if full { &mut self.lyr_full } else { &mut self.lyr_side };
+                let seek = view.show(ui, rect, if full { "letra-cheia" } else { "letra" }, &key, &l, pos, crate::lyric_view::Look { size, anchor });
+                if let (Some(s), Some(sess)) = (seek, &self.session) {
+                    sess.seek(s.max(0.0) as f64);
+                }
+                ui.painter().text(pos2(rect.right(), rect.bottom() + 4.0), Align2::RIGHT_TOP, "Letra: LRCLIB", theme::medium(10.5), Color32::from_white_alpha(70));
+                true
+            }
+        }
+    }
+
+    /// Tela cheia, no jeito do Apple Music: capa e controles à esquerda, letra à direita. Sem letra,
+    /// a capa vai pro meio.
+    fn full_view(&mut self, ui: &mut Ui, full: Rect, v: &View) {
+        let p = ui.painter().clone();
+        let now = v.state.now.as_ref();
+        let has_lyrics = now.is_some_and(|n| matches!(crate::lyrics::get(&n.track.title, &n.track.artist, &n.track.album, n.track.dur as f32, || {}), crate::lyrics::State::Ready(ref l) if !l.lines.is_empty()));
+        let split = ui.ctx().animate_bool_with_time(Id::new("cheia-split"), has_lyrics, 0.5);
+        let w = full.width();
+        let h = full.height();
+        // coluna da esquerda: 45 % (com letra) ou a tela toda (sem)
+        let left_w = theme::lerp_f(w, w * 0.45, split);
+        let cover = (h * if h <= 1000.0 { 0.45 } else { 0.50 }).min(w * 0.38).min(left_w * 0.78);
+        let block_h = cover + 196.0;
+        let cx = full.left() + left_w / 2.0 + split * w * 0.02;
+        let top = full.center().y - block_h / 2.0;
+        let (pos, dur, playing) = v.pos.unwrap_or((0.0, 0.0, false));
+
+        // a capa: encolhe pra 0,94 quando pausa (mola k 280, c 24, m 0,6), sombra macia da cor dela
+        let goal = if playing || now.is_none() { 1.0 } else { 0.94 };
+        let dt = ui.input(|i| i.stable_dt).min(0.05);
+        for _ in 0..4 {
+            let (x, vel) = self.cover_k;
+            let a = (-280.0 * (x - goal) - 24.0 * vel) / 0.6;
+            let vel = vel + a * dt / 4.0;
+            self.cover_k = (x + vel * dt / 4.0, vel);
+        }
+        if (self.cover_k.0 - goal).abs() > 0.0005 {
+            ui.ctx().request_repaint();
+        }
+        let art_url = now.map(|n| n.track.art.clone()).unwrap_or_default();
+        let (art, color) = match self.arts.get(&art_url) {
+            Some(a) => (Some(a.tex.clone()), a.color),
+            None => (None, Color32::from_gray(60)),
+        };
+        let cover_r = Rect::from_center_size(pos2(cx, top + cover / 2.0), vec2(cover, cover) * self.cover_k.0);
+        let radius = (cover * 0.025).max(8.0);
+        let cr = egui::CornerRadius::same(radius.round().min(255.0) as u8);
+        let deep = Color32::from_rgb(color.r() / 5, color.g() / 5, color.b() / 5);
+        let sh = if playing { 1.0 } else { 0.7 };
+        for (off, blur, a) in [(4i8, 8u8, 0.14f32), (12, 24, 0.14), (28, 56, 0.16), (48, 110, 0.2)] {
+            let c = Color32::from_rgba_unmultiplied(deep.r(), deep.g(), deep.b(), (255.0 * a * sh) as u8);
+            p.add(egui::epaint::Shadow { offset: [0, (off as f32 * sh) as i8], blur, spread: 0, color: c }.as_shape(cover_r, cr));
+        }
+        match art {
+            Some(t) => {
+                egui::Image::from_texture((t.id(), cover_r.size())).corner_radius(radius).paint_at(ui, cover_r);
+            }
+            None => {
+                p.rect_filled(cover_r, radius, Color32::from_gray(24));
+                vinyl(&p, cover_r.center(), cover * 0.22, if playing { ui.input(|i| i.time) as f32 * 1.2 } else { 0.0 });
+            }
+        }
+        // fio de 1 pixel por dentro: separa a capa de um fundo da mesma cor
+        let ppp = ui.ctx().pixels_per_point();
+        p.rect_stroke(cover_r, radius, Stroke::new(1.0 / ppp, Color32::from_white_alpha(30)), StrokeKind::Inside);
+
+        // título, artista e quem pediu
+        let col = Rect::from_min_size(pos2(cx - cover / 2.0, top + cover + 26.0), vec2(cover, 170.0));
+        let mut y = col.top();
+        match now {
+            Some(n) => {
+                let title = theme::fit(&p, &n.track.title, theme::semi(21.0), col.width());
+                p.text(pos2(col.left(), y + 12.0), Align2::LEFT_CENTER, title, theme::semi(21.0), Color32::from_white_alpha(235));
+                let mut sub = n.track.artist.clone();
+                if !n.track.by.is_empty() {
+                    sub = format!("{sub} · pedido por {}", n.track.by);
+                }
+                let sub = theme::fit(&p, &sub, theme::regular(17.0), col.width());
+                p.text(pos2(col.left(), y + 40.0), Align2::LEFT_CENTER, sub, theme::regular(17.0), Color32::from_white_alpha(125));
+            }
+            None => {
+                p.text(pos2(col.left(), y + 12.0), Align2::LEFT_CENTER, "Nada tocando", theme::semi(21.0), FAINT);
+            }
+        }
+        y += 72.0;
+
+        // barra de tempo (fundo 15 %, cheio 40 %; claro com o mouse)
+        let bar = Rect::from_min_size(pos2(col.left(), y), vec2(col.width(), 8.0));
+        let resp = ui.interact(bar.expand2(vec2(0.0, 10.0)), Id::new("cheia-barra"), if now.is_some() { Sense::click_and_drag() } else { Sense::hover() });
+        let hover = resp.hovered() || resp.dragged();
+        let bh = ui.ctx().animate_bool_with_time(Id::new("cheia-barra-h"), hover, 0.12) * 4.0 + 6.0;
+        let track = Rect::from_center_size(bar.center(), vec2(bar.width(), bh));
+        let mut frac = if dur > 0.0 { (pos / dur) as f32 } else { 0.0 };
+        if let Some(m) = resp.interact_pointer_pos().filter(|_| resp.dragged() || resp.clicked()) {
+            frac = ((m.x - bar.left()) / bar.width()).clamp(0.0, 1.0);
+        }
+        if (resp.drag_stopped() || resp.clicked()) && dur > 0.0 {
+            if let Some(s) = &self.session {
+                s.seek(frac as f64 * dur);
+            }
+        }
+        if hover {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        p.rect_filled(track, bh / 2.0, Color32::from_white_alpha(38));
+        let filled = Rect::from_min_max(track.min, pos2(track.left() + track.width() * frac.clamp(0.0, 1.0), track.bottom()));
+        p.rect_filled(filled, bh / 2.0, Color32::from_white_alpha(if hover { 235 } else { 110 }));
+        let shown = frac as f64 * dur;
+        let tc = Color32::from_white_alpha(120);
+        p.text(pos2(col.left(), y + 22.0), Align2::LEFT_CENTER, theme::time(if now.is_some() { shown } else { f64::NAN }), theme::medium(12.0), tc);
+        p.text(pos2(col.right(), y + 22.0), Align2::RIGHT_CENTER, format!("-{}", theme::time(if now.is_some() { (dur - shown).max(0.0) } else { f64::NAN })), theme::medium(12.0), tc);
+        y += 66.0;
+
+        // botões
+        let has = now.is_some();
+        let b = |dx: f32, s: f32| Rect::from_center_size(pos2(col.center().x + dx, y), vec2(s, s));
+        if theme::icon_button(ui, b(-92.0, 52.0), "cheia-ant", icon::PREV, 30.0, has).clicked() {
+            self.cmd("prev");
+        }
+        if theme::icon_button(ui, b(0.0, 64.0), "cheia-tocar", if playing { icon::PAUSE } else { icon::PLAY }, 42.0, has).clicked() {
+            self.cmd("toggle");
+        }
+        if theme::icon_button(ui, b(92.0, 52.0), "cheia-prox", icon::NEXT, 30.0, has).clicked() {
+            self.cmd("next");
+        }
+
+        // a letra
+        if split > 0.01 {
+            let lx = full.left() + w * 0.45 + w * 0.02;
+            let lr = Rect::from_min_max(pos2(lx, full.top() + 70.0), pos2(full.right() - w * 0.08, full.bottom() - 60.0));
+            let size = (h * 0.05).max(w * 0.025).clamp(24.0, 58.0);
+            ui.scope_builder(egui::UiBuilder::new().max_rect(lr), |ui| {
+                ui.set_opacity(split);
+                self.lyrics_area(ui, lr, v, size, 0.35, true);
+            });
+        }
+
+        // em cima: sair da tela cheia (some com o mouse parado)
+        let t = ui.input(|i| i.time);
+        let idle = t - self.moved_at > 3.0;
+        let vis = ui.ctx().animate_bool_with_time(Id::new("cheia-vis"), !idle, 0.3);
+        // (esconder o cursor do mouse travava o desenho no Mac: só os botões somem)
+        if !idle {
+            ui.ctx().request_repaint_after(Duration::from_millis(500));
+        }
+        if vis > 0.01 {
+            let g = Rect::from_center_size(pos2(full.right() - 34.0, full.top() + 30.0), vec2(36.0, 36.0));
+            ui.scope(|ui| {
+                ui.set_opacity(vis);
+                if theme::icon_button(ui, g, "cheia-sair", icon::SHRINK, 18.0, true).on_hover_text("Sair da tela cheia (Esc)").clicked() {
+                    self.set_fullscreen(ui.ctx(), false);
+                }
+            });
         }
     }
 
@@ -878,7 +1108,7 @@ impl App {
         let seg = Rect::from_min_size(inner.min, vec2(inner.width(), 36.0));
         p.rect_filled(seg, 18.0, Color32::from_white_alpha(14));
         let qn = v.state.queue.len();
-        let mut tabs = vec![(Tab::Queue, if qn > 0 { format!("Fila · {qn}") } else { "Fila".to_string() }), (Tab::Search, "Buscar".to_string())];
+        let mut tabs = vec![(Tab::Queue, if qn > 0 { format!("Fila · {qn}") } else { "Fila".to_string() }), (Tab::Search, "Buscar".to_string()), (Tab::Lyrics, "Letra".to_string())];
         if !v.host {
             tabs.push((Tab::Sound, "Som".to_string()));
         }
@@ -907,6 +1137,10 @@ impl App {
             Tab::Queue => self.queue_list(ui, body, v),
             Tab::Search => self.search(ui, body, v),
             Tab::Sound => self.equalizer(ui, body),
+            Tab::Lyrics => {
+                let size = 22.0;
+                self.lyrics_area(ui, body.shrink2(vec2(6.0, 0.0)), v, size, 0.30, false);
+            }
         }
 
         // volume de quem ouve
@@ -1193,13 +1427,18 @@ impl App {
     fn take_shot(&mut self, ctx: &egui::Context) {
         let Some(path) = self.shot.clone() else { return };
         self.frame_no += 1;
+        if self.frame_no % 50 == 0 {
+            crate::log::log(format!("quadro {}", self.frame_no));
+        }
         let at: u64 = std::env::var("JAM_SHOT_QUADRO").ok().and_then(|v| v.parse().ok()).unwrap_or(40);
         if self.frame_no == at {
             let c = ctx.clone();
             ctx.request_screenshot(move |img| {
                 let [w, h] = img.size;
                 let bytes: Vec<u8> = img.pixels.iter().flat_map(|p| p.to_array()).collect();
-                let _ = image::save_buffer(&path, &bytes, w as u32, h as u32, image::ExtendedColorType::Rgba8);
+                if let Err(e) = image::save_buffer(&path, &bytes, w as u32, h as u32, image::ExtendedColorType::Rgba8) {
+                    crate::log::log(format!("foto da tela falhou ({w}x{h}): {e}"));
+                }
                 c.send_viewport_cmd(egui::ViewportCommand::Close);
             });
         }

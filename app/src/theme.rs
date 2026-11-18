@@ -50,6 +50,9 @@ pub mod icon {
     pub const WARN: &str = "\u{E4E2}";
     pub const VINYL: &str = "\u{ECAC}";
     pub const HEADPHONES: &str = "\u{E2A6}";
+    pub const EXPAND: &str = "\u{E1D0}";
+    pub const SHRINK: &str = "\u{E1CE}";
+    pub const LYRICS: &str = "\u{E660}";
     pub const ARROW_RIGHT: &str = "\u{E06C}";
 }
 
@@ -223,4 +226,8 @@ pub fn initials(name: &str) -> String {
         Some(b) => format!("{}{}", a.to_uppercase(), b.to_uppercase()),
         None => a.to_uppercase().to_string(),
     }
+}
+
+pub fn lerp_f(a: f32, b: f32, t: f32) -> f32 {
+    a + (b - a) * t
 }

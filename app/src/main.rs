@@ -8,6 +8,8 @@ mod capture;
 mod eq;
 mod glass_gl;
 mod log;
+mod lyric_view;
+mod lyrics;
 mod player;
 mod prefs;
 mod proto;
