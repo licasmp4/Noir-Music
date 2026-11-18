@@ -122,9 +122,9 @@ impl Decoder {
     }
 }
 
-/// Folga: começa em 250 ms (música não precisa de atraso baixo, precisa de não cortar) e sobe
+/// Folga: começa em 600 ms (medido 18/11: com 250 ms, quem entrava cortava 3–4 vezes nos primeiros 10 s; música não precisa de atraso baixo, precisa de não cortar) e sobe
 /// 100 ms a cada corte, até 1,2 s. Desce devagar depois de 60 s sem corte.
-const MIN_MS: usize = 250;
+const MIN_MS: usize = 600;
 const MAX_MS: usize = 1200;
 const STEP_MS: usize = 100;
 
