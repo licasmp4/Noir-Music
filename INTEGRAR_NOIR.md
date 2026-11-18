@@ -1,33 +1,33 @@
-# Juntar a Jam no Noir (aba "Noir Música")
+# Juntar a Noir Music no Noir (aba "Noir Música")
 
-A Jam foi feita com as mesmas peças do Noir: `net/` é cópia da `Telao/net`, e `glass_gl.rs` e o tema
-chapado também vêm de lá. Por isso juntar é **trazer os arquivos da Jam pra uma pasta própria
+A Noir Music foi feita com as mesmas peças do Noir: `net/` é cópia da `Telao/net`, e `glass_gl.rs` e o tema
+chapado também vêm de lá. Por isso juntar é **trazer os arquivos da Noir Music pra uma pasta própria
 dentro do Noir** e ligar uma aba nova. Não é reescrever nada.
 
 ## 1. A sala (net)
 
-O Noir já tem a `net`. Só falta o tipo de mensagem `"jam"` no `Telao/net/src/sfu.rs`, dentro do
-`match` de `member_message`, ao lado do `"chat"`. Copie o braço `"jam" => { ... }` de
-`Jam/net/src/sfu.rs`. Ele só repassa os pedidos, com limite de 300 KB, e o `to` manda pra uma
+O Noir já tem a `net`. Só falta o tipo de mensagem `"musica"` no `Telao/net/src/sfu.rs`, dentro do
+`match` de `member_message`, ao lado do `"chat"`. Copie o braço `"musica" => { ... }` de
+`Noir Music/net/src/sfu.rs`. Ele só repassa os pedidos, com limite de 300 KB, e o `to` manda pra uma
 pessoa só.
 
-Depois disso, publique o worker/servidor como de costume. O som da Jam vai na faixa **Voice**, que
+Depois disso, publique o worker/servidor como de costume. O som da Noir Music vai na faixa **Voice**, que
 o Noir já entrega pra todo mundo sem precisar "assistir".
 
 ## 2. Os arquivos (pasta própria, sem bater nome)
 
-O Noir já tem `eq.rs`, `lyrics.rs`, `capture.rs` e `prefs.rs` com outras funções. Então tudo da Jam
+O Noir já tem `eq.rs`, `lyrics.rs`, `capture.rs` e `prefs.rs` com outras funções. Então tudo da Noir Music
 vai pra `Telao/windows/src/musica/`:
 
-| Da Jam (`app/src/`) | Vai pra (`windows/src/musica/`) | Observação |
+| Da Noir Music (`app/src/`) | Vai pra (`windows/src/musica/`) | Observação |
 |---|---|---|
-| `room.rs` | `room.rs` | troque `jam_net::` por `crate::net::` (ou o nome da crate de rede do Noir) |
+| `room.rs` | `room.rs` | troque `noir_music_net::` por `crate::net::` (ou o nome da crate de rede do Noir) |
 | `audio.rs`, `eq.rs` | `audio.rs`, `eq.rs` | o eq do Noir é de outra coisa: mantenha os dois |
 | `capture.rs` | `captura.rs` | captura só o app de música (ScreenCaptureKit), Mac |
 | `player.rs`, `search.rs`, `proto.rs` | iguais | AppleScript do Spotify/Music, busca, mensagens |
 | `lyrics.rs`, `lyric_view.rs` | `letra.rs`, `letra_view.rs` | letra do LRCLIB e a tela de letra |
 | `arts.rs` | `capas.rs` | capas e o fundo borrado |
-| `app.rs` (a tela `jam`, `full_view`, `side`, `equalizer`) | `tela.rs` | vira `fn musica(&mut self, ui, rect)` |
+| `app.rs` (a tela `sala`, `full_view`, `side`, `equalizer`) | `tela.rs` | vira `fn musica(&mut self, ui, rect)` |
 | `prefs.rs` | **não copia** | junte os campos `spotify_id`, `spotify_secret`, `eq_*` no `Prefs` do Noir |
 | `theme.rs`, `glass_gl.rs`, `log.rs` | **não copia** | use os do Noir (são a mesma origem) |
 
@@ -36,7 +36,7 @@ do Noir. Nos arquivos copiados, troque `crate::xxx` por `crate::musica::xxx`, me
 vidro e log, que continuam apontando pro Noir.
 
 Dependências que o Noir talvez ainda não tenha no `Cargo.toml`: `audiopus` (Opus), `ureq` 2 e
-`base64`. O `screencapturekit` e o `cpal` ele já usa. Compile com as mesmas variáveis da Jam:
+`base64`. O `screencapturekit` e o `cpal` ele já usa. Compile com as mesmas variáveis da Noir Music:
 `LIBOPUS_LIB_DIR=/opt/homebrew/opt/opus/lib LIBOPUS_STATIC=1`.
 
 ## 3. A aba
@@ -44,11 +44,11 @@ Dependências que o Noir talvez ainda não tenha no `Cargo.toml`: `audiopus` (Op
 Desde 13/11 o dock tem só **Transmitir** e **Assistir**. Entra uma terceira, **Música**, que chama
 `self.musica(ui, rect)`:
 
-- Sem sala: o início da Jam ("Tocar pra galera" / "Entrar na Jam de um amigo").
-- Com sala: a tela da Jam (capa com o vidro, fila, busca, letra, som).
+- Sem sala: o início da Noir Music ("Tocar pra galera" / "Entrar na sala de um amigo").
+- Com sala: a tela da Noir Music (capa com o vidro, fila, busca, letra, som).
 - Tela cheia (F/Esc): usa a mesma janela do Noir.
 
-O código da sala da Jam começa com `JAM-`. O Noir pode aceitar os dois no mesmo campo de
+O código da sala da Noir Music começa com `NM-`. O Noir pode aceitar os dois no mesmo campo de
 "Entrar".
 
 Regras do Noir que valem aqui também:
@@ -65,7 +65,7 @@ Regras do Noir que valem aqui também:
   da música, fila (pôr, subir, tirar), tocar agora e passar pra próxima sozinho no fim.
 - Equalizador: 4 testes medindo o som (`cargo test`).
 - Letra: o parser tem testes e a busca no LRCLIB foi conferida. A tela de letra foi vista na
-  prévia, não numa Jam de verdade.
+  prévia, não numa Noir Music de verdade.
 
 ## 5. Limites
 

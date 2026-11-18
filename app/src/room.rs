@@ -1,8 +1,8 @@
-//! A Jam aberta: quem toca (sala + som + fila) ou quem ouve (sala + saída de som).
+//! A Noir Music aberta: quem toca (sala + som + fila) ou quem ouve (sala + saída de som).
 //!
 //! Quem toca roda a sala no próprio computador (a rede do Noir: código pela nuvem, direto entre os
 //! PCs e relay quando a internet não deixa) e entra nela como membro. O som vai na faixa de voz da
-//! sala, que chega pra todo mundo sem precisar "assistir". Os pedidos vão como mensagens `jam`.
+//! sala, que chega pra todo mundo sem precisar "assistir". Os pedidos vão como mensagens `musica`.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -10,7 +10,7 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use jam_net::{CallMember, CallServer, Track as NetTrack};
+use noir_music_net::{CallMember, CallServer, Track as NetTrack};
 use serde_json::{Value, json};
 
 use crate::audio::{Decoder, Encoder, FRAME, Output};
@@ -43,7 +43,7 @@ pub struct Shared {
     pub code: Option<String>,
     pub state: State,
     pub state_at: Instant,
-    /// Quem está na Jam (nomes)
+    /// Quem está na Noir Music (nomes)
     pub people: Vec<String>,
     pub results: Results,
     /// Aviso rápido embaixo ("Breno pôs Yoga na fila")
@@ -67,7 +67,7 @@ pub struct Session {
 
 enum HostMsg {
     /// Pedido de alguém (nome, id na sala, dados). id vazio = eu mesmo
-    Jam(String, String, Value),
+    Pedido(String, String, Value),
     /// Entrou alguém: manda o estado de novo
     Roster,
     Art(String, String),
@@ -101,7 +101,7 @@ impl Session {
         }
     }
 
-    /// Abre a minha Jam (só no Mac): a sala, o som do app de música e a fila
+    /// Abre a minha Noir Music (só no Mac): a sala, o som do app de música e a fila
     pub fn open(prefs: &Prefs, repaint: Repaint) -> Session {
         let mut s = Session::new(true, repaint.clone(), Phase::Opening);
         let (tx, rx) = channel();
@@ -110,7 +110,7 @@ impl Session {
         let creds = (prefs.spotify_id.trim().to_string(), prefs.spotify_secret.trim().to_string());
         {
             let (shared, member, repaint) = (shared.clone(), member.clone(), repaint.clone());
-            let _ = std::thread::Builder::new().name("jam-host".into()).spawn(move || engine(rx, tx, shared, member, name, creds, repaint));
+            let _ = std::thread::Builder::new().name("musica-host".into()).spawn(move || engine(rx, tx, shared, member, name, creds, repaint));
         }
         let url = Arc::new(Mutex::new(String::new()));
         let (sh, mem, rp, nm, eng) = (shared.clone(), member.clone(), repaint.clone(), prefs.name.clone(), s.engine.clone());
@@ -126,7 +126,7 @@ impl Session {
                     "room" => {
                         let code = e["code"].as_str().unwrap_or("").to_string();
                         let room = e["room"].as_str().unwrap_or("").to_string();
-                        crate::log::log(format!("Jam aberta: {code}"));
+                        crate::log::log(format!("Noir Music aberta: {code}"));
                         {
                             let mut s = lock(&sh);
                             s.code = Some(code);
@@ -151,7 +151,7 @@ impl Session {
         s
     }
 
-    /// Entra na Jam de um amigo pelo código
+    /// Entra na Noir Music de um amigo pelo código
     pub fn join(prefs: &Prefs, code: String, repaint: Repaint) -> Session {
         let mut s = Session::new(false, repaint.clone(), Phase::Joining);
         lock(&s.shared).code = Some(code.clone());
@@ -167,10 +167,10 @@ impl Session {
     fn send(&self, data: Value) {
         if self.host {
             if let Some(tx) = &self.engine {
-                let _ = tx.send(HostMsg::Jam(String::new(), String::new(), data));
+                let _ = tx.send(HostMsg::Pedido(String::new(), String::new(), data));
             }
         } else if let Some(m) = lock(&self.member).as_ref() {
-            m.send(json!({"kind": "jam", "data": data}));
+            m.send(json!({"kind": "musica", "data": data}));
         }
     }
 
@@ -222,7 +222,7 @@ impl Session {
         self.send(json!({"t": "search", "q": q, "rid": rid}));
     }
 
-    /// JAM_TESTE=1 (quem ouve): busca, põe na fila, pula, adianta, pausa, volta, tira da fila e
+    /// NM_TESTE=1 (quem ouve): busca, põe na fila, pula, adianta, pausa, volta, tira da fila e
     /// anota no registro o que quem toca respondeu a cada passo
     pub fn run_test(&self) {
         let me = self;
@@ -243,7 +243,7 @@ impl Session {
                 wait(1);
             }
             crate::log::log(format!("TESTE início: {}", now(&me)));
-            me.search(&std::env::var("JAM_TESTE_BUSCA").unwrap_or("love".into()));
+            me.search(&std::env::var("NM_TESTE_BUSCA").unwrap_or("love".into()));
             for _ in 0..20 {
                 if !lock(&me.shared).results.loading {
                     break;
@@ -343,18 +343,18 @@ fn join(url: String, code: String, name: String, shared: Arc<Mutex<Shared>>, cel
                     let _ = tx.send(HostMsg::Roster);
                 }
             }
-            "jam" => {
+            "musica" => {
                 let data = &e["data"];
                 if let Some(tx) = &engine {
-                    let _ = tx.send(HostMsg::Jam(e["name"].as_str().unwrap_or("Amigo").to_string(), e["from"].as_str().unwrap_or("").to_string(), data.clone()));
+                    let _ = tx.send(HostMsg::Pedido(e["name"].as_str().unwrap_or("Amigo").to_string(), e["from"].as_str().unwrap_or("").to_string(), data.clone()));
                 } else {
                     on_listener_msg(&sh, data, out1.as_deref());
                 }
             }
-            "room_closed" => lock(&sh).phase = Phase::Closed("Quem estava tocando fechou a Jam.".into()),
+            "room_closed" => lock(&sh).phase = Phase::Closed("Quem estava tocando fechou a sala.".into()),
             "error" | "disconnected" => {
-                let msg = e["message"].as_str().unwrap_or("A conexão com a Jam caiu.").to_string();
-                crate::log::log(format!("Jam: {kind} {msg}"));
+                let msg = e["message"].as_str().unwrap_or("A conexão com a sala caiu.").to_string();
+                crate::log::log(format!("Noir Music: {kind} {msg}"));
                 let mut s = lock(&sh);
                 if !host || s.phase != Phase::Live {
                     s.phase = Phase::Closed(friendly(&msg));
@@ -396,7 +396,7 @@ fn join(url: String, code: String, name: String, shared: Arc<Mutex<Shared>>, cel
         o.push(&pcm);
     });
     let m = Arc::new(CallMember::start(url, code, name, events, on_media));
-    m.send(json!({"kind": "state", "state": {"mic": false, "deaf": false, "jam": if host { "host" } else { "ouvindo" }}}));
+    m.send(json!({"kind": "state", "state": {"mic": false, "deaf": false, "musica": if host { "host" } else { "ouvindo" }}}));
     *lock(&cell) = Some(m);
     repaint();
 }
@@ -404,9 +404,9 @@ fn join(url: String, code: String, name: String, shared: Arc<Mutex<Shared>>, cel
 fn friendly(msg: &str) -> String {
     let low = msg.to_lowercase();
     if low.contains("not found") || low.contains("não achei") || low.contains("404") {
-        "Não achei essa Jam. Confira o código ou peça um novo.".into()
+        "Não achei essa sala. Confira o código ou peça um novo.".into()
     } else if low.contains("cheia") {
-        "A Jam está cheia.".into()
+        "A sala está cheia.".into()
     } else {
         msg.to_string()
     }
@@ -514,7 +514,7 @@ fn engine(rx: Receiver<HostMsg>, tx: Sender<HostMsg>, shared: Arc<Mutex<Shared>>
         e.ensure_capture();
         e.publish(false);
     }
-    crate::log::log("Jam fechada");
+    crate::log::log("Noir Music fechada");
 }
 
 impl Engine {
@@ -529,8 +529,8 @@ impl Engine {
     fn read(&mut self) {
         self.next_read = Instant::now() + Duration::from_millis(1000);
         let mut list = player::read();
-        // teste: JAM_SOURCE=music só olha pro Apple Music (não mexe no Spotify de quem está ouvindo)
-        if let Ok(only) = std::env::var("JAM_SOURCE") {
+        // teste: NM_SOURCE=music só olha pro Apple Music (não mexe no Spotify de quem está ouvindo)
+        if let Ok(only) = std::env::var("NM_SOURCE") {
             list.retain(|r| r.source == only);
         }
         let prev = self.now.clone();
@@ -556,7 +556,7 @@ impl Engine {
             }
             None => {
                 self.now = None;
-                let only = std::env::var("JAM_SOURCE").ok();
+                let only = std::env::var("NM_SOURCE").ok();
                 let run: Vec<&str> = player::running().into_iter().filter(|s| only.as_deref().is_none_or(|o| o == *s)).collect();
                 if let Some(s) = run.iter().find(|s| **s == self.source).or(run.first()).copied() {
                     self.source = s.to_string();
@@ -716,7 +716,7 @@ impl Engine {
             return;
         }
         if let Some(m) = lock(&self.member).as_ref() {
-            m.send(json!({"kind": "jam", "data": {"t": "state", "state": st}}));
+            m.send(json!({"kind": "musica", "data": {"t": "state", "state": st}}));
         }
         {
             let mut s = lock(&self.shared);
@@ -730,7 +730,7 @@ impl Engine {
 
     fn toast(&self, text: String) {
         if let Some(m) = lock(&self.member).as_ref() {
-            m.send(json!({"kind": "jam", "data": {"t": "toast", "text": text}}));
+            m.send(json!({"kind": "musica", "data": {"t": "toast", "text": text}}));
         }
         lock(&self.shared).toast = Some((text, Instant::now()));
         (self.repaint)();
@@ -748,7 +748,7 @@ impl Engine {
             drop(s);
             (self.repaint)();
         } else if let Some(m) = lock(&self.member).as_ref() {
-            m.send(json!({"kind": "jam", "to": to, "data": data}));
+            m.send(json!({"kind": "musica", "to": to, "data": data}));
         }
     }
 
@@ -766,7 +766,7 @@ impl Engine {
                 self.creds = (id, secret);
                 self.publish(true);
             }
-            HostMsg::Jam(who, from, d) => self.request(&who, &from, &d),
+            HostMsg::Pedido(who, from, d) => self.request(&who, &from, &d),
         }
     }
 
@@ -848,7 +848,7 @@ impl Engine {
                 let repaint = self.repaint.clone();
                 std::thread::spawn(move || {
                     let (items, error) = match src.as_str() {
-                        "spotify" if creds.0.is_empty() => (Vec::new(), Some(format!("{me_name} ainda não ligou a busca do Spotify no Jam."))),
+                        "spotify" if creds.0.is_empty() => (Vec::new(), Some(format!("{me_name} ainda não ligou a busca do Spotify no Noir Music."))),
                         "spotify" => match crate::search::spotify(&q, &creds.0, &creds.1) {
                             Ok(v) => (v, None),
                             Err(e) => (Vec::new(), Some(e)),
@@ -879,7 +879,7 @@ impl Engine {
                         drop(s);
                         repaint();
                     } else if let Some(m) = lock(&member).as_ref() {
-                        m.send(json!({"kind": "jam", "to": to, "data": data}));
+                        m.send(json!({"kind": "musica", "to": to, "data": data}));
                     }
                 });
             }

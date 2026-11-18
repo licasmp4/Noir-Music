@@ -12,7 +12,7 @@ use serde_json::Value;
 use crate::proto::Track;
 
 fn agent() -> ureq::Agent {
-    ureq::AgentBuilder::new().timeout(Duration::from_secs(8)).user_agent("Jam/0.1").build()
+    ureq::AgentBuilder::new().timeout(Duration::from_secs(8)).user_agent("NoirMusic/0.1").build()
 }
 
 // MARK: - Spotify

@@ -1,4 +1,4 @@
-//! As telas: Início (abrir a minha Jam ou entrar com código) e a Jam (palco com a capa, o player
+//! As telas: Início (abrir a minha Noir Music ou entrar com código) e a Noir Music (palco com a capa, o player
 //! de vidro do Canopy 2 e a coluna da fila e da busca).
 
 use std::sync::Arc;
@@ -14,7 +14,7 @@ use crate::room::{Phase, Session};
 use crate::theme::{self, DIM, FAINT, SURFACE, TEXT, icon};
 
 pub fn icon() -> egui::IconData {
-    match image::load_from_memory(include_bytes!("../assets/jam-256.png")).map(|i| i.to_rgba8()) {
+    match image::load_from_memory(include_bytes!("../assets/noir-music-256.png")).map(|i| i.to_rgba8()) {
         Ok(i) => egui::IconData { width: i.width(), height: i.height(), rgba: i.into_raw() },
         Err(_) => egui::IconData::default(),
     }
@@ -66,7 +66,7 @@ pub struct App {
     moved_at: f64,
     /// Encolhe a capa quando pausa (mola)
     cover_k: (f32, f32),
-    /// Prévia sem rede (JAM_DEMO=1) e foto da tela (JAM_SHOT=arquivo.png)
+    /// Prévia sem rede (NM_DEMO=1) e foto da tela (NM_SHOT=arquivo.png)
     demo: Option<crate::room::Shared>,
     frame_no: u64,
     shot: Option<String>,
@@ -83,12 +83,12 @@ impl App {
         let mut arts = Arts::new();
         arts.repaint = Some(cc.egui_ctx.clone());
         let mut prefs = prefs;
-        if let Some(v) = std::env::var("JAM_VOLUME").ok().and_then(|v| v.parse().ok()) {
+        if let Some(v) = std::env::var("NM_VOLUME").ok().and_then(|v| v.parse().ok()) {
             prefs.volume = v;
         }
-        // teste sem clicar: JAM_AUTO=host abre a minha Jam; JAM_AUTO=join:CODIGO entra
+        // teste sem clicar: NM_AUTO=host abre a minha Noir Music; NM_AUTO=join:CODIGO entra
         let rp = Self::repaint_fn(&cc.egui_ctx);
-        let session = match std::env::var("JAM_AUTO").ok() {
+        let session = match std::env::var("NM_AUTO").ok() {
             Some(a) if a == "host" => Some(Session::open(&prefs, rp)),
             Some(a) if a.starts_with("join:") => Some(Session::join(&prefs, a[5..].to_string(), rp)),
             _ => None,
@@ -101,7 +101,7 @@ impl App {
             session,
             arts,
             error: None,
-            tab: match std::env::var("JAM_DEMO_ABA").as_deref() {
+            tab: match std::env::var("NM_DEMO_ABA").as_deref() {
                 Ok("busca") => Tab::Search,
                 Ok("som") => Tab::Sound,
                 Ok("letra") => Tab::Lyrics,
@@ -123,14 +123,14 @@ impl App {
             eq_drag: None,
             eq_spec: Vec::new(),
             grain: None,
-            fullscreen: std::env::var("JAM_DEMO_CHEIA").is_ok(),
+            fullscreen: std::env::var("NM_DEMO_CHEIA").is_ok(),
             lyr_side: Default::default(),
             lyr_full: Default::default(),
             moved_at: 0.0,
             cover_k: (1.0, 0.0),
             demo: crate::app::demo(),
             frame_no: 0,
-            shot: std::env::var("JAM_SHOT").ok(),
+            shot: std::env::var("NM_SHOT").ok(),
         }
     }
 
@@ -147,7 +147,7 @@ impl eframe::App for App {
         let full = ui.max_rect();
         ui.painter().rect_filled(full, 0.0, theme::BG);
 
-        // a Jam fechou (quem tocava saiu, código errado): volta pro início com o motivo
+        // a Noir Music fechou (quem tocava saiu, código errado): volta pro início com o motivo
         let closed = self.session.as_ref().and_then(|s| match lock(&s.shared).phase.clone() {
             Phase::Closed(m) => Some(m),
             _ => None,
@@ -157,7 +157,7 @@ impl eframe::App for App {
             self.session = None;
         }
         if self.session.is_some() || self.demo.is_some() {
-            self.jam(ui, full);
+            self.sala(ui, full);
         } else {
             self.home(ui, full);
         }
@@ -202,7 +202,7 @@ impl App {
         let c = pos2(full.center().x, y + 34.0);
         vinyl(&p, c, 30.0, t * 0.6);
         y += 84.0;
-        p.text(pos2(full.center().x, y), Align2::CENTER_TOP, "Jam", theme::display(46.0), TEXT);
+        p.text(pos2(full.center().x, y), Align2::CENTER_TOP, "Noir Music", theme::display(46.0), TEXT);
         y += 58.0;
         p.text(pos2(full.center().x, y), Align2::CENTER_TOP, "A mesma música, ao vivo, pra todo mundo da roda.", theme::regular(15.0), DIM);
         y += 48.0;
@@ -222,7 +222,7 @@ impl App {
         p.text(card.min + vec2(20.0, 42.0), Align2::LEFT_TOP, sub, theme::regular(13.0), FAINT);
         let btn = Rect::from_min_size(card.min + vec2(20.0, 72.0), vec2(w - 40.0, 36.0));
         let name_ok = !self.prefs.name.trim().is_empty();
-        if theme::pill(ui, btn, "abrir", "Abrir minha Jam", true, can_host && name_ok).clicked() {
+        if theme::pill(ui, btn, "abrir", "Abrir minha sala", true, can_host && name_ok).clicked() {
             self.prefs.save();
             self.error = None;
             self.session = Some(Session::open(&self.prefs, Self::repaint_fn(ui.ctx())));
@@ -233,10 +233,10 @@ impl App {
         let card = Rect::from_min_size(pos2(x, y), vec2(w, 110.0));
         p.rect_filled(card, 22.0, SURFACE);
         p.rect_stroke(card, 22.0, Stroke::new(1.0, theme::hairline()), StrokeKind::Inside);
-        p.text(card.min + vec2(20.0, 18.0), Align2::LEFT_TOP, "Entrar na Jam de um amigo", theme::semi(15.0), TEXT);
+        p.text(card.min + vec2(20.0, 18.0), Align2::LEFT_TOP, "Entrar na sala de um amigo", theme::semi(15.0), TEXT);
         let code_r = Rect::from_min_size(card.min + vec2(20.0, 50.0), vec2(w - 40.0 - 108.0, 40.0));
-        let enter = field(ui, code_r, "codigo", &mut self.code, "JAM-XXXX-XXXX", Some(icon::HEADPHONES));
-        let valid = jam_net::parse_cloud_code(&self.code).is_some() || jam_net::share_code::ShareCode::decode(self.code.trim()).is_some();
+        let enter = field(ui, code_r, "codigo", &mut self.code, "NM-XXXX-XXXX", Some(icon::HEADPHONES));
+        let valid = noir_music_net::parse_cloud_code(&self.code).is_some() || noir_music_net::share_code::ShareCode::decode(self.code.trim()).is_some();
         let go = Rect::from_min_size(pos2(code_r.right() + 8.0, code_r.top() + 2.0), vec2(100.0, 36.0));
         if (theme::pill(ui, go, "entrar", "Entrar", false, valid && name_ok).clicked() || (enter && valid && name_ok)) && self.session.is_none() {
             self.prefs.last_code = self.code.trim().to_uppercase();
@@ -295,7 +295,7 @@ fn vinyl(p: &egui::Painter, c: Pos2, r: f32, angle: f32) {
     p.circle_filled(c, r * 0.07, Color32::from_gray(22));
 }
 
-// MARK: - A Jam
+// MARK: - A Noir Music
 
 struct View {
     state: State,
@@ -319,7 +319,7 @@ impl App {
             }
             (None, Some(d)) => {
                 let n = d.state.now.clone();
-                (clone_shared(d), std::env::var("JAM_DEMO").as_deref() != Ok("ouvinte"), n.map(|n| (n.pos, n.track.dur, n.playing)))
+                (clone_shared(d), std::env::var("NM_DEMO").as_deref() != Ok("ouvinte"), n.map(|n| (n.pos, n.track.dur, n.playing)))
             }
             _ => unreachable!(),
         };
@@ -337,7 +337,7 @@ impl App {
         }
     }
 
-    fn jam(&mut self, ui: &mut Ui, full: Rect) {
+    fn sala(&mut self, ui: &mut Ui, full: Rect) {
         let v = self.view();
         let _ = v.state_age;
         let top = 58.0;
@@ -377,9 +377,9 @@ impl App {
         // abrindo / entrando
         if matches!(v.phase, Phase::Opening | Phase::Joining) && self.demo.is_none() {
             let msg = if v.host {
-                if v.code.is_none() { "Abrindo a sua Jam…" } else { "Quase lá…" }
+                if v.code.is_none() { "Abrindo a sua sala…" } else { "Quase lá…" }
             } else {
-                "Entrando na Jam…"
+                "Entrando na sala…"
             };
             let p = ui.painter();
             let r = Rect::from_center_size(pos2(stage.center().x, stage.top() + 24.0), vec2(200.0, 32.0));
@@ -393,7 +393,7 @@ impl App {
         let y = full.top() + 29.0;
         // os três botões do Mac ficam à esquerda
         let mut x = full.left() + if cfg!(target_os = "macos") { 86.0 } else { 20.0 };
-        let wm = p.text(pos2(x, y), Align2::LEFT_CENTER, "Jam", theme::display(19.0), TEXT);
+        let wm = p.text(pos2(x, y), Align2::LEFT_CENTER, "Noir Music", theme::display(19.0), TEXT);
         x = wm.right() + 14.0;
         if let Some(code) = &v.code {
             let copied = self.copied_at.is_some_and(|t| t.elapsed() < Duration::from_millis(1600));
@@ -410,7 +410,7 @@ impl App {
                 self.copied_at = Some(Instant::now());
             }
             if v.phase == Phase::Live || self.demo.is_some() {
-                // bolinha verde: a Jam está no ar
+                // bolinha verde: a Noir Music está no ar
                 let live = pos2(r.right() + 16.0, y);
                 let pulse = (ui.input(|i| i.time) as f32 * 2.2).sin() * 0.5 + 0.5;
                 p.circle_filled(live, 4.0 + pulse * 3.0, theme::GOOD.gamma_multiply(0.18));
@@ -657,7 +657,7 @@ impl App {
 
     fn set_fullscreen(&mut self, ctx: &egui::Context, on: bool) {
         self.fullscreen = on;
-        if std::env::var_os("JAM_SHOT").is_none() {
+        if std::env::var_os("NM_SHOT").is_none() {
             ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(on));
         }
     }
@@ -1423,14 +1423,11 @@ impl App {
         }
     }
 
-    /// JAM_SHOT=arquivo.png: salva a tela depois de uns quadros e fecha (pra conferir o desenho)
+    /// NM_SHOT=arquivo.png: salva a tela depois de uns quadros e fecha (pra conferir o desenho)
     fn take_shot(&mut self, ctx: &egui::Context) {
         let Some(path) = self.shot.clone() else { return };
         self.frame_no += 1;
-        if self.frame_no % 50 == 0 {
-            crate::log::log(format!("quadro {}", self.frame_no));
-        }
-        let at: u64 = std::env::var("JAM_SHOT_QUADRO").ok().and_then(|v| v.parse().ok()).unwrap_or(40);
+        let at: u64 = std::env::var("NM_SHOT_QUADRO").ok().and_then(|v| v.parse().ok()).unwrap_or(40);
         if self.frame_no == at {
             let c = ctx.clone();
             ctx.request_screenshot(move |img| {
@@ -1453,11 +1450,11 @@ enum RowKind {
     Result,
 }
 
-/// O vidro do player em cima da capa. JAM_VIDRO escolhe a variação (pra comparar):
+/// O vidro do player em cima da capa. NM_VIDRO escolhe a variação (pra comparar):
 /// a = ilha do Canopy 2 igual (fumê quase preto em cima) · b = cartão do Noir (mesma lente, fumê aberto)
 /// c = cartão com a lente na escala da peça e a cor da capa · d = c com fosco leve no meio
 fn player_glass(radius: f32, k: f32, tint: Color32) -> Glass {
-    let v = std::env::var("JAM_VIDRO").unwrap_or_else(|_| "c".into());
+    let v = std::env::var("NM_VIDRO").unwrap_or_else(|_| "c".into());
     let mut g = match v.as_str() {
         "a" => Glass::island(radius),
         _ => Glass::card([radius; 4]),
@@ -1510,12 +1507,12 @@ fn clone_shared(s: &crate::room::Shared) -> crate::room::Shared {
     }
 }
 
-/// JAM_DEMO=1: uma Jam de mentira (sem rede) pra conferir o desenho. JAM_DEMO_ART = capa (arquivo)
+/// NM_DEMO=1: uma Noir Music de mentira (sem rede) pra conferir o desenho. NM_DEMO_ART = capa (arquivo)
 pub fn demo() -> Option<crate::room::Shared> {
-    std::env::var_os("JAM_DEMO")?;
-    let art = std::env::var("JAM_DEMO_ART").map(|p| if p.starts_with("https://") { p } else { format!("file://{p}") }).unwrap_or_default();
+    std::env::var_os("NM_DEMO")?;
+    let art = std::env::var("NM_DEMO_ART").map(|p| if p.starts_with("https://") { p } else { format!("file://{p}") }).unwrap_or_default();
     let t = |title: &str, artist: &str, by: &str, dur: f64| Track { id: format!("spotify:track:{title}"), title: title.into(), artist: artist.into(), album: String::new(), art: art.clone(), dur, by: by.into() };
-    let tab = std::env::var("JAM_DEMO_ABA").unwrap_or_default();
+    let tab = std::env::var("NM_DEMO_ABA").unwrap_or_default();
     let mut results = crate::room::Results::default();
     if tab == "busca" {
         results.q = "yoga".into();
@@ -1523,7 +1520,7 @@ pub fn demo() -> Option<crate::room::Shared> {
     }
     Some(crate::room::Shared {
         phase: Phase::Live,
-        code: Some("JAM-K7M2-QXAB".into()),
+        code: Some("NM-K7M2-QXAB".into()),
         state: State {
             now: Some(crate::proto::Now { track: t("Runnin' Thru the 7th with My Woadies", "$uicideboy$", "Breno", 197.8), pos: 72.0, playing: true }),
             queue: vec![t("Yoga", "Janelle Monáe, Jidenna", "Breno", 196.0), t("Nights", "Frank Ocean", "Gui", 307.0), t("Redbone", "Childish Gambino", "Ana", 327.0)],

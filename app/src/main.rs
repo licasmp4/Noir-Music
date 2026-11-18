@@ -19,10 +19,10 @@ mod theme;
 
 fn main() -> eframe::Result<()> {
     std::panic::set_hook(Box::new(|p| crate::log::log(format!("travou: {p}"))));
-    log::log(format!("Jam {} abrindo", env!("CARGO_PKG_VERSION")));
-    // JAM_TESTE=1 JAM_AUTO=join:CODIGO: roda o roteiro de controles sem janela e sai
-    if std::env::var_os("JAM_TESTE").is_some() {
-        if let Some(code) = std::env::var("JAM_AUTO").ok().and_then(|a| a.strip_prefix("join:").map(String::from)) {
+    log::log(format!("Noir Music {} abrindo", env!("CARGO_PKG_VERSION")));
+    // NM_TESTE=1 NM_AUTO=join:CODIGO: roda o roteiro de controles sem janela e sai
+    if std::env::var_os("NM_TESTE").is_some() {
+        if let Some(code) = std::env::var("NM_AUTO").ok().and_then(|a| a.strip_prefix("join:").map(String::from)) {
             let mut p = prefs::Prefs::load();
             p.name = "Teste".into();
             p.volume = 0.0;
@@ -33,13 +33,13 @@ fn main() -> eframe::Result<()> {
             return Ok(());
         }
     }
-    let size = std::env::var("JAM_SIZE")
+    let size = std::env::var("NM_SIZE")
         .ok()
         .and_then(|s| s.split_once('x').and_then(|(w, h)| Some([w.parse().ok()?, h.parse().ok()?])))
         .unwrap_or([1080.0, 700.0]);
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
-            .with_title("Jam")
+            .with_title("Noir Music")
             .with_icon(app::icon())
             .with_inner_size(size)
             .with_min_inner_size([860.0, 580.0])
@@ -49,5 +49,5 @@ fn main() -> eframe::Result<()> {
             .with_titlebar_shown(false),
         ..Default::default()
     };
-    eframe::run_native("Jam", options, Box::new(|cc| Ok(Box::new(app::App::new(cc)))))
+    eframe::run_native("Noir Music", options, Box::new(|cc| Ok(Box::new(app::App::new(cc)))))
 }

@@ -69,7 +69,7 @@ pub fn get(title: &str, artist: &str, album: &str, dur: f32, done: impl Fn() + S
 }
 
 fn agent() -> ureq::Agent {
-    ureq::AgentBuilder::new().timeout(Duration::from_secs(10)).user_agent(concat!("Jam/", env!("CARGO_PKG_VERSION"))).build()
+    ureq::AgentBuilder::new().timeout(Duration::from_secs(10)).user_agent(concat!("NoirMusic/", env!("CARGO_PKG_VERSION"))).build()
 }
 
 /// "(feat. X)", "- Remastered 2011", "[Explicit]" atrapalham achar

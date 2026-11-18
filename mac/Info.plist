@@ -2,17 +2,17 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleName</key><string>Jam</string>
-  <key>CFBundleDisplayName</key><string>Jam</string>
-  <key>CFBundleIdentifier</key><string>com.licasmp4.jam</string>
-  <key>CFBundleExecutable</key><string>Jam</string>
-  <key>CFBundleIconFile</key><string>Jam</string>
+  <key>CFBundleName</key><string>Noir Music</string>
+  <key>CFBundleDisplayName</key><string>Noir Music</string>
+  <key>CFBundleIdentifier</key><string>com.licasmp4.noirmusic</string>
+  <key>CFBundleExecutable</key><string>NoirMusic</string>
+  <key>CFBundleIconFile</key><string>NoirMusic</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>0.1.0</string>
   <key>CFBundleVersion</key><string>1</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>NSHighResolutionCapable</key><true/>
-  <key>NSAppleEventsUsageDescription</key><string>O Jam lê a música que está tocando e obedece aos pedidos dos amigos (tocar, pular, pôr na fila) no Spotify ou no Apple Music.</string>
-  <key>NSAudioCaptureUsageDescription</key><string>O Jam manda o som do Spotify ou do Apple Music pros amigos.</string>
+  <key>NSAppleEventsUsageDescription</key><string>O Noir Music lê a música que está tocando e obedece aos pedidos dos amigos (tocar, pular, pôr na fila) no Spotify ou no Apple Music.</string>
+  <key>NSAudioCaptureUsageDescription</key><string>O Noir Music manda o som do Spotify ou do Apple Music pros amigos.</string>
 </dict>
 </plist>

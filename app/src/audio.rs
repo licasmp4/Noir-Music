@@ -1,4 +1,4 @@
-//! O som da Jam: o Opus pra música (estéreo, 48 kHz, 256 kbps), uma cópia do pacote anterior
+//! O som da Noir Music: o Opus pra música (estéreo, 48 kHz, 256 kbps), uma cópia do pacote anterior
 //! dentro de cada pacote (se um se perde na internet, o próximo traz ele de volta) e a saída de
 //! quem ouve com folga que cresce sozinha quando a internet oscila.
 
@@ -189,8 +189,8 @@ impl Output {
             rate: RATE as f32,
             tmp: Vec::new(),
         }));
-        // JAM_SEM_SAIDA=1: não abre o som (teste com várias janelas no mesmo fone Bluetooth)
-        let opened = if std::env::var_os("JAM_SEM_SAIDA").is_some() { Err("sem saída (teste)".to_string()) } else { open(shared.clone()) };
+        // NM_SEM_SAIDA=1: não abre o som (teste com várias janelas no mesmo fone Bluetooth)
+        let opened = if std::env::var_os("NM_SEM_SAIDA").is_some() { Err("sem saída (teste)".to_string()) } else { open(shared.clone()) };
         match opened {
             Ok((stream, device)) => Output { shared, _stream: Some(stream), device, error: None },
             Err(e) => {

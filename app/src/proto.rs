@@ -1,4 +1,4 @@
-//! O que vai pela sala entre quem toca e quem ouve (dentro do `{"kind": "jam", "data": ...}`).
+//! O que vai pela sala entre quem toca e quem ouve (dentro do `{"kind": "musica", "data": ...}`).
 //!
 //! Quem ouve → quem toca: `cmd` (tocar/pausar, próxima, anterior, ir pra um ponto), `add`
 //! (pôr na fila), `play` (tocar agora), `remove`/`up` (mexer na fila), `search` (buscar).

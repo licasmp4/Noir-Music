@@ -1,5 +1,5 @@
 //! Registro em arquivo (pra entender o que aconteceu quando um amigo diz que não funcionou).
-//! Mac: ~/Library/Application Support/Jam/log.txt · Windows: %APPDATA%\Jam\log.txt
+//! Mac: ~/Library/Application Support/Noir Music/log.txt · Windows: %APPDATA%\Noir Music\log.txt
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -13,8 +13,15 @@ pub fn dir() -> PathBuf {
     } else {
         std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Library/Application Support")).unwrap_or_else(std::env::temp_dir)
     };
-    let d = base.join("Jam");
-    let _ = std::fs::create_dir_all(&d);
+    let d = base.join("Noir Music");
+    if !d.exists() {
+        // antes chamava Jam: traz as preferências (nome, Spotify, equalizador)
+        let old = base.join("Jam").join("prefs.json");
+        let _ = std::fs::create_dir_all(&d);
+        if old.exists() {
+            let _ = std::fs::copy(old, d.join("prefs.json"));
+        }
+    }
     d
 }
 

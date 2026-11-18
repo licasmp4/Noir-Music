@@ -1740,40 +1740,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3bd1574e617a9a6c1f8f8181bd7e841e1f20e4277607ef28945765188d6284d4"
 
 [[package]]
-name = "jam"
-version = "0.1.0"
-dependencies = [
- "audiopus",
- "base64",
- "cpal",
- "eframe",
- "image",
- "jam-net",
- "screencapturekit",
- "serde",
- "serde_json",
- "ureq",
-]
-
-[[package]]
-name = "jam-net"
-version = "0.1.0"
-dependencies = [
- "futures-util",
- "if-addrs",
- "igd-next",
- "md-5",
- "rand 0.9.5",
- "serde",
- "serde_json",
- "sha1",
- "socket2",
- "str0m",
- "tokio",
- "tokio-tungstenite",
-]
-
-[[package]]
 name = "jni"
 version = "0.22.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2079,6 +2045,40 @@ name = "nohash-hasher"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2bf50223579dc7cdcfb3bfcacf7069ff68243f8c363f62ffa99cf000a6b9c451"
+
+[[package]]
+name = "noir-music"
+version = "0.1.0"
+dependencies = [
+ "audiopus",
+ "base64",
+ "cpal",
+ "eframe",
+ "image",
+ "noir-music-net",
+ "screencapturekit",
+ "serde",
+ "serde_json",
+ "ureq",
+]
+
+[[package]]
+name = "noir-music-net"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "if-addrs",
+ "igd-next",
+ "md-5",
+ "rand 0.9.5",
+ "serde",
+ "serde_json",
+ "sha1",
+ "socket2",
+ "str0m",
+ "tokio",
+ "tokio-tungstenite",
+]
 
 [[package]]
 name = "nom"

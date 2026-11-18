@@ -9,11 +9,11 @@ use crate::signal::Signal;
 use crate::viewer::Target;
 
 const DEFAULT_URL: &str = "wss://noir-signal.lucasgluiz-9.workers.dev";
-const PREFIX: &str = "JAM";
+const PREFIX: &str = "NM";
 const ROOM_LEN: usize = 8;
 
 fn base() -> String {
-    std::env::var("JAM_CLOUD").ok().filter(|v| !v.is_empty()).unwrap_or_else(|| DEFAULT_URL.into())
+    std::env::var("NM_CLOUD").ok().filter(|v| !v.is_empty()).unwrap_or_else(|| DEFAULT_URL.into())
 }
 
 /// Como a próxima sala abre (o app escolhe antes de criar)
@@ -82,7 +82,7 @@ pub(crate) fn return_url(room: &str, resume: Option<&str>) -> Option<String> {
 /// Quanto tempo tentar voltar (o servidor segura o lugar por 25 s)
 pub(crate) const RETURN_SECS: u64 = 22;
 
-/// `K7M2QXAB` vira `JAM-K7M2-QXAB`
+/// `K7M2QXAB` vira `NM-K7M2-QXAB`
 pub fn encode(room: &str) -> String {
     let (a, b) = room.split_at(room.len().min(ROOM_LEN / 2));
     format!("{PREFIX}-{a}-{b}")
@@ -106,15 +106,15 @@ mod tests {
 
     #[test]
     fn codigo_ida_e_volta() {
-        assert_eq!(encode("K7M2QXAB"), "JAM-K7M2-QXAB");
-        assert_eq!(parse("JAM-K7M2-QXAB").as_deref(), Some("K7M2QXAB"));
-        assert_eq!(parse(" jam k7m2 qxab\n").as_deref(), Some("K7M2QXAB"));
+        assert_eq!(encode("K7M2QXAB"), "NM-K7M2-QXAB");
+        assert_eq!(parse("NM-K7M2-QXAB").as_deref(), Some("K7M2QXAB"));
+        assert_eq!(parse(" nm k7m2 qxab\n").as_deref(), Some("K7M2QXAB"));
     }
 
     #[test]
     fn codigo_invalido() {
         assert_eq!(parse("TL-043VN-E5HHB"), None);
-        assert_eq!(parse("JAM-K7M2"), None);
-        assert_eq!(parse("JAM-K7M2-QXA0"), None); // 0 não existe no alfabeto
+        assert_eq!(parse("NM-K7M2"), None);
+        assert_eq!(parse("NM-K7M2-QXA0"), None); // 0 não existe no alfabeto
     }
 }

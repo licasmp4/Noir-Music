@@ -713,14 +713,14 @@ impl Sfu {
                 self.members[i].state = d["state"].clone();
                 self.broadcast(self.roster());
             }
-            "jam" => {
-                // Jam: pedidos de quem ouve (tocar, pular, pôr na fila) e o estado de quem toca.
+            "musica" => {
+                // Noir Music: pedidos de quem ouve (tocar, pular, pôr na fila) e o estado de quem toca.
                 // A sala só repassa; quem toca decide. `to` manda pra uma pessoa só.
                 let data = &d["data"];
                 if data.to_string().len() > 300_000 {
                     return;
                 }
-                let msg = json!({"kind": "jam", "from": self.members[i].id, "name": self.members[i].name, "data": data});
+                let msg = json!({"kind": "musica", "from": self.members[i].id, "name": self.members[i].name, "data": data});
                 match d["to"].as_str() {
                     Some(to) => {
                         let to = to.to_string();

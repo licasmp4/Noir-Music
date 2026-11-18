@@ -7,7 +7,7 @@ use eframe::egui::{self, Color32, ColorImage, TextureHandle, TextureOptions};
 
 pub struct Art {
     pub tex: TextureHandle,
-    /// A capa bem borrada (o fundo da Jam)
+    /// A capa bem borrada (o fundo da Noir Music)
     pub blur: TextureHandle,
     pub color: Color32,
 }

@@ -1,4 +1,4 @@
-//! O que o Jam lembra entre uma vez e outra (prefs.json na pasta do log).
+//! O que o Noir Music lembra entre uma vez e outra (prefs.json na pasta do log).
 
 use serde::{Deserialize, Serialize};
 

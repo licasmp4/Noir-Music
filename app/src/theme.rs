@@ -1,4 +1,4 @@
-//! Cara do Jam, a mesma do Noir: preto e cinza, branco no principal, botões chapados (sem brilho
+//! Cara do Noir Music, a mesma do Noir: preto e cinza, branco no principal, botões chapados (sem brilho
 //! nem degradê), vidro só onde tem imagem atrás. Fonte da Apple no Mac, Inter no Windows.
 
 use std::sync::Arc;
@@ -218,7 +218,7 @@ pub fn lerp(a: Color32, b: Color32, t: f32) -> Color32 {
     Color32::from_rgba_premultiplied(m(a.r(), b.r()), m(a.g(), b.g()), m(a.b(), b.b()), m(a.a(), b.a()))
 }
 
-/// Iniciais pra bolinha de quem está na Jam
+/// Iniciais pra bolinha de quem está na Noir Music
 pub fn initials(name: &str) -> String {
     let mut it = name.split_whitespace();
     let a = it.next().and_then(|w| w.chars().next()).unwrap_or('?');

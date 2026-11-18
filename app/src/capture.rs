@@ -1,5 +1,5 @@
 //! O som só do app de música (Spotify ou Apple Music), sem o resto do computador: nem Discord,
-//! nem aviso, nem o próprio Jam. No Mac pelo ScreenCaptureKit, que captura o som de um app só.
+//! nem aviso, nem o próprio Noir Music. No Mac pelo ScreenCaptureKit, que captura o som de um app só.
 
 pub type PcmSink = Box<dyn FnMut(&[f32]) + Send>;
 
@@ -97,7 +97,7 @@ mod mac {
     fn hint(e: &str) -> String {
         let low = e.to_lowercase();
         if low.contains("declined") || low.contains("permission") || low.contains("tcc") || low.contains("-3801") {
-            "O Mac não deixou pegar o som. Abra Ajustes do Sistema › Privacidade e Segurança › Gravação de Tela e Áudio do Sistema, ligue o Jam e abra ele de novo.".into()
+            "O Mac não deixou pegar o som. Abra Ajustes do Sistema › Privacidade e Segurança › Gravação de Tela e Áudio do Sistema, ligue o Noir Music e abra ele de novo.".into()
         } else {
             format!("não deu pra pegar o som: {e}")
         }
@@ -117,9 +117,9 @@ pub struct Capture {
 #[cfg(not(target_os = "macos"))]
 impl Capture {
     pub fn start(_bundle: &str, _sink: PcmSink) -> Result<Capture, String> {
-        Err("Por enquanto só dá pra tocar a Jam pelo Mac. No Windows dá pra entrar e ouvir.".into())
+        Err("Por enquanto só dá pra abrir uma sala pelo Mac. No Windows dá pra entrar e ouvir.".into())
     }
 }
 
-/// Pode tocar a Jam daqui?
+/// Pode tocar a Noir Music daqui?
 pub const CAN_HOST: bool = cfg!(target_os = "macos");

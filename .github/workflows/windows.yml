@@ -1,6 +1,6 @@
 name: Windows
 
-# Compila o Jam pro Windows (quem ouve) e publica o zip na release "windows"
+# Compila o Noir Music pro Windows (quem ouve) e publica o zip na release "windows"
 on:
   push:
     branches: [main]
@@ -22,21 +22,21 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Compilar
-        run: cargo build --release -p jam
+        run: cargo build --release -p noir-music
 
       - name: Empacotar
         shell: pwsh
         run: |
-          New-Item -ItemType Directory Jam | Out-Null
-          Copy-Item target\release\Jam.exe Jam\
-          Copy-Item app\assets\OFL-Inter.txt Jam\
-          Copy-Item app\assets\Phosphor-LICENSE.txt Jam\
-          Compress-Archive Jam\* Jam-Windows.zip
+          New-Item -ItemType Directory NoirMusic | Out-Null
+          Copy-Item target\release\NoirMusic.exe NoirMusic\
+          Copy-Item app\assets\OFL-Inter.txt NoirMusic\
+          Copy-Item app\assets\Phosphor-LICENSE.txt NoirMusic\
+          Compress-Archive NoirMusic\* NoirMusic-Windows.zip
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Jam-Windows
-          path: Jam-Windows.zip
+          name: NoirMusic-Windows
+          path: NoirMusic-Windows.zip
 
       - name: Publicar
         shell: pwsh
@@ -44,5 +44,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release view windows -R ${{ github.repository }} 2>$null
-          if ($LASTEXITCODE -ne 0) { gh release create windows -R ${{ github.repository }} --title "Jam para Windows" --notes "Baixe o zip, extraia e abra o Jam.exe." }
-          gh release upload windows Jam-Windows.zip -R ${{ github.repository }} --clobber
+          if ($LASTEXITCODE -ne 0) { gh release create windows -R ${{ github.repository }} --title "Noir Music para Windows" --notes "Baixe o zip, extraia e abra o NoirMusic.exe." }
+          gh release upload windows NoirMusic-Windows.zip -R ${{ github.repository }} --clobber
